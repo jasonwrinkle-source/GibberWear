@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    GibberWear Android Manifest
+    Configures core permissions, hardware feature requirements, and components for the Wear OS application.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Declares that this application runs on Wear OS smartwatches -->
+    <uses-feature android:name="android.hardware.type.watch" />
+
+    <!-- Haptic check-in reminder (v2): vibrate for the prompt pulse. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Bluetooth LE permissions (GibberLink BLE service) -->
+    <!-- Legacy Bluetooth permissions for Android 11 (API level 30) and lower -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <!-- Modern Bluetooth runtime permissions for Android 12 (API level 31) and higher -->
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Declares that Bluetooth Low Energy (BLE) hardware is required -->
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+        <!-- Standalone Wear OS app: can function independently without a paired phone app -->
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="true" />
+        <!-- Main launcher activity for the Wear OS interface -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

@@ -1,0 +1,19 @@
+{
+    "logs": [
+        {
+            "outputFile": "app.gibberwear.app-mergeDebugResources-44:/values-v30/values-v30.xml",
+            "map": [
+                {
+                    "source": "/home/jason/.gradle/caches/9.6.0/transforms/02e013ca2f57528c8483e5692b2bfc2d/transformed/material3-release/res/values-v30/values-v30.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "72",
+                        "endOffsets": "123"
+                    }
+                }
+            ]
+        }
+    ]
+}

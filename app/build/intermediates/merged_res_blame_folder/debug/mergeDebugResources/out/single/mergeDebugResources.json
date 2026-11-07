@@ -1,0 +1,282 @@
+[
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n_m80.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n_m80.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n10.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n10.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e90.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e90.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n_m50.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n_m50.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_tap.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_tap.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_hold.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_hold.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e_m30.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e_m30.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h100.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h100.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h_m70.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h_m70.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h_m20.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h_m20.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n90.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n90.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h30.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h30.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n_m100.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n_m100.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e40.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e40.wav"
+    },
+    {
+        "merged": "app.gibberwear.app-debug-46:/mipmap-anydpi-v26_ic_launcher_round.xml.flat",
+        "source": "app.gibberwear.app-main-48:/mipmap-anydpi-v26/ic_launcher_round.xml"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e_m80.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e_m80.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h_m10.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h_m10.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n60.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n60.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h_m80.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h_m80.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h_m100.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h_m100.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e10.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e10.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n_m70.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n_m70.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e30.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e30.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e_m50.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e_m50.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_doubletap.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_doubletap.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n70.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n70.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e100.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e100.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h_m90.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h_m90.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h10.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h10.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h90.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h90.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n0.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n0.wav"
+    },
+    {
+        "merged": "app.gibberwear.app-debug-46:/drawable_ic_launcher_foreground.xml.flat",
+        "source": "app.gibberwear.app-main-48:/drawable/ic_launcher_foreground.xml"
+    },
+    {
+        "merged": "app.gibberwear.app-debug-46:/mipmap-anydpi-v26_ic_launcher.xml.flat",
+        "source": "app.gibberwear.app-main-48:/mipmap-anydpi-v26/ic_launcher.xml"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n_m60.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n_m60.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e_m60.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e_m60.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e_m70.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e_m70.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n80.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n80.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e20.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e20.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n_m10.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n_m10.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e_m100.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e_m100.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h50.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h50.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h_m60.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h_m60.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h20.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h20.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n50.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n50.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h80.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h80.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e50.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e50.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e_m10.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e_m10.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n20.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n20.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e80.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e80.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e0.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e0.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e_m40.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e_m40.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h_m30.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h_m30.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n_m40.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n_m40.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h0.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h0.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h70.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h70.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n100.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n100.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h40.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h40.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h_m40.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h_m40.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e70.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e70.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n30.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n30.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n_m90.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n_m90.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e_m90.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e_m90.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n_m30.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n_m30.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n_m20.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n_m20.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h60.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h60.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_h_m50.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_h_m50.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_n40.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_n40.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e_m20.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e_m20.wav"
+    },
+    {
+        "merged": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-debug-46:/raw_chirp_e60.wav.flat",
+        "source": "/home/jason/.gradle/daemon/9.6.0/app.gibberwear.app-main-48:/raw/chirp_e60.wav"
+    },
+    {
+        "merged": "app.gibberwear.app-debug-46:/drawable_ic_launcher_background.xml.flat",
+        "source": "app.gibberwear.app-main-48:/drawable/ic_launcher_background.xml"
+    }
+]
