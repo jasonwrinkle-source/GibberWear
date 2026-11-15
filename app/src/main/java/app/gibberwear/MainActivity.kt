@@ -1,21 +1,22 @@
 package app.gibberwear
 
+import android.content.Context
+import android.content.SharedPreferences
+import android.media.MediaPlayer
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.KeyEvent
+import android.util.Log
 import android.view.MotionEvent
-import android.window.OnBackInvokedDispatcher
 import androidx.activity.ComponentActivity
-import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
+import androidx.annotation.RawRes
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -38,16 +39,15 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -57,13 +57,17 @@ import kotlin.math.atan2
 import kotlin.math.min
 import kotlin.math.sqrt
 
-/**
- * GibberWear v2 — MainActivity.
- */
 class MainActivity : ComponentActivity() {
 
     companion object {
-        const val REMINDER_INTERVAL_MS = 5 * 60 * 1000L
+        private const val TAG = "GibberWearMain"
+
+        const val PREFS_NAME = "gibberwear_prefs"
+        const val PREF_PROFILE_KEY = "profile_key"
+        const val PREF_TIMER_SEC = "timer_sec"
+        const val PREF_LPM = "low_power_mode"
+        const val DEFAULT_PROFILE_KEY = "adam"
+
         const val ARC_START = 100f
         const val ARC_SWEEP = 340f
         const val CHECKIN_SHOW_MS = 3000L
@@ -71,10 +75,22 @@ class MainActivity : ComponentActivity() {
         const val FOCUS_DIM_TIMEOUT_MS = 3000L
     }
 
-    private lateinit var chirpPlayer: ChirpPlayer
+    private lateinit var prefs: SharedPreferences
+    private lateinit var gibberLinkEngine: GibberLinkEngine
     private lateinit var hapticReminder: HapticReminder
     private lateinit var gestureDetector: WristGestureDetector
     private lateinit var bleServer: BleServer
+
+    private var localAudioPlayer: MediaPlayer? = null
+
+    var profileKey by mutableStateOf(DEFAULT_PROFILE_KEY)
+        private set
+    var timerSec by mutableStateOf(0)
+        private set
+    var isLowPowerMode by mutableStateOf(false)
+        private set
+
+    private var isBleConnected = false
 
     private val metrics = listOf(
         MetricChirp.ENJOYMENT,
@@ -89,11 +105,14 @@ class MainActivity : ComponentActivity() {
         MetricChirp.ENDURANCE to 0
     )
 
-    // Center flash color persists until next tap/double-tap/hold recolors it
     private var centerFlash by mutableStateOf<Color?>(null)
     private var checkInSymbol by mutableStateOf<String?>(null)
     private var isInteracting by mutableStateOf(false)
     private var isFocusAdjusting by mutableStateOf(false)
+    
+    private val widgetTypes = listOf("R3", "W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8")
+    private var widgetTypeIndex by mutableStateOf(0)
+    private val currentWidgetType get() = widgetTypes[widgetTypeIndex]
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val clearCheckInRunnable = Runnable { checkInSymbol = null }
@@ -101,7 +120,6 @@ class MainActivity : ComponentActivity() {
     private val restoreEqualBrightnessRunnable = Runnable { isFocusAdjusting = false }
 
     private fun flashCenter(color: Color) {
-        // Persists until next tap / double-tap / hold recolors it
         centerFlash = color
     }
 
@@ -136,40 +154,43 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        chirpPlayer = ChirpPlayer(this)
+        prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        profileKey = prefs.getString(PREF_PROFILE_KEY, DEFAULT_PROFILE_KEY) ?: DEFAULT_PROFILE_KEY
+        timerSec = prefs.getInt(PREF_TIMER_SEC, 0)
+        isLowPowerMode = prefs.getBoolean(PREF_LPM, false)
+
         hapticReminder = HapticReminder(this)
+
+        gibberLinkEngine = GibberLinkEngine(this) { incoming ->
+            handleIncomingMessage(incoming)
+        }
 
         bleServer = BleServer(
             context = this,
-            onCheckInPulse = { triggerCheckInPulse() },
-            onCheckInTimer = { triggerCheckInTimer() },
-            onProfileIdUpdated = { }
+            onConnectionChange = { connected ->
+                isBleConnected = connected
+                Log.i(TAG, "BLE connection state changed: $connected")
+                updateGibberLinkState()
+            },
+            onMessageReceived = { incoming ->
+                handleIncomingMessage(incoming)
+            }
         )
 
         gestureDetector = WristGestureDetector(
             context = this,
-            onShake = { sendTap() },
-            onFlip = { more -> sendDoubleTap(if (more) "more" else "less") },
-            onSustainedShake = { sendHold() }
+            onFlickUp = { cycleRatingType() },
+            onFlickDown = { sendTap() },
+            onShake = { sendDoubleTap() },
+            onSustainedShake = { sendHold() },
+            onWristRoll = { sendWristRoll() }
         )
-
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                cycleMetricFocus()
-            }
-        })
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            onBackInvokedDispatcher.registerOnBackInvokedCallback(
-                OnBackInvokedDispatcher.PRIORITY_DEFAULT
-            ) {
-                cycleMetricFocus()
-            }
-        }
 
         setContent {
             MaterialTheme {
                 GibberWearScreen(
+                    profileKey = profileKey,
+                    timerSec = timerSec,
                     focusedMetricIndex = metricIndex,
                     enjoymentVal = metricValues[MetricChirp.ENJOYMENT] ?: 0,
                     heatVal = metricValues[MetricChirp.HEAT] ?: 0,
@@ -184,35 +205,158 @@ class MainActivity : ComponentActivity() {
                     },
                     onRingTap = { metric, v ->
                         markInteraction()
-                        setMetricValue(metric, v, forcePlay = true)
+                        setMetricValue(metric, v, transmit = true)
                     },
                     onRingDrag = { metric, v ->
                         markInteraction()
-                        setMetricValue(metric, v, forcePlay = false)
+                        // Drag only smoothly updates local display - no chirp / BLE mid-drag
+                        setMetricValue(metric, v, transmit = false)
+                    },
+                    onRingRelease = { metric ->
+                        markInteraction()
+                        // Final release transmits the settled value
+                        val finalVal = metricValues[metric] ?: 0
+                        transmitMetric(metric, finalVal)
                     },
                     onCentreTap = { sendTap() },
-                    onDoubleTap = { sendDoubleTap(null) },
+                    onDoubleTap = { sendDoubleTap() },
                     onLongPress = { sendHold() },
                     onRotary = { delta ->
                         markInteraction()
                         val currentMetric = metrics[metricIndex]
                         val currentVal = metricValues[currentMetric] ?: 0
-                        setMetricValue(currentMetric, currentVal + delta, forcePlay = false)
+                        setMetricValue(currentMetric, currentVal + delta, transmit = true)
                     },
+                    onSwipeUp = { cycleWidgetType() },
                     onCheckInTimerTrigger = { triggerCheckInTimer() }
                 )
             }
         }
     }
 
+    private fun handleIncomingMessage(raw: String) {
+        val msg = raw.trim()
+        Log.i(TAG, "Incoming message: $msg")
+
+        when {
+            msg.startsWith("CFG:") -> {
+                val parts = msg.split(":")
+                if (parts.size >= 3) {
+                    val newKey = parts[1].trim()
+                    val newTimerSec = parts[2].trim().toIntOrNull() ?: 0
+                    if (newKey.isNotEmpty()) {
+                        profileKey = newKey
+                        timerSec = newTimerSec
+                        prefs.edit()
+                            .putString(PREF_PROFILE_KEY, newKey)
+                            .putInt(PREF_TIMER_SEC, newTimerSec)
+                            .apply()
+                        Log.i(TAG, "Configured profile: key=$newKey, timerSec=$newTimerSec")
+
+                        val ackMsg = "ACK:$newKey:CFG"
+                        transmitTelemetry(ackMsg)
+                    }
+                }
+            }
+
+            msg.startsWith("CHK:") -> {
+                val parts = msg.split(":")
+                if (parts.size >= 3) {
+                    val targetKey = parts[1].trim()
+                    val type = parts[2].trim()
+
+                    val isTarget = targetKey.equals("ALL", ignoreCase = true) ||
+                            targetKey.equals(profileKey, ignoreCase = true)
+
+                    if (isTarget) {
+                        when (type.uppercase()) {
+                            "P" -> triggerCheckInPulse()
+                            "T" -> triggerCheckInTimer()
+                        }
+                    }
+                }
+            }
+
+            msg.startsWith("HEAT:") -> {
+                val parts = msg.split(":")
+                if (parts.size >= 3) {
+                    val targetKey = parts[1].trim()
+                    val heatVal = parts[2].trim().toIntOrNull()
+
+                    val isTarget = targetKey.equals("ALL", ignoreCase = true) ||
+                            targetKey.equals(profileKey, ignoreCase = true)
+
+                    if (isTarget && heatVal != null) {
+                        runOnUiThread {
+                            setMetricValue(MetricChirp.HEAT, heatVal, transmit = false)
+                            flashCenter(Color(0xFFFF9800)) // Amber / heat flash
+                            markInteraction()
+                            hapticReminder.pulseSingle()
+                        }
+                        Log.i(TAG, "Adopted heat: key=$targetKey, heat=$heatVal")
+                    }
+                }
+            }
+            msg.startsWith("LPM:") -> {
+                val parts = msg.split(":")
+                if (parts.size >= 2) {
+                    val lpmVal = parts[1].trim()
+                    isLowPowerMode = (lpmVal == "1" || lpmVal.uppercase() == "ON")
+                    prefs.edit().putBoolean(PREF_LPM, isLowPowerMode).apply()
+                    Log.i(TAG, "Low Power Mode set to: $isLowPowerMode")
+                    updateGibberLinkState()
+                }
+            }
+        }
+    }
+
+    private fun updateGibberLinkState() {
+        if (isLowPowerMode && isBleConnected) {
+            Log.i(TAG, "LPM is ON and BLE is connected. Stopping GibberLink ultrasound.")
+            gibberLinkEngine.stopListening()
+        } else {
+            Log.i(TAG, "LPM is OFF or BLE is disconnected. Starting GibberLink ultrasound.")
+            gibberLinkEngine.startListening()
+        }
+    }
+
+    private fun transmitTelemetry(fullPayload: String, @RawRes fallbackAudioResId: Int? = null) {
+        bleServer.sendNotification(fullPayload)
+        gibberLinkEngine.sendChirp(fullPayload)
+        if (fallbackAudioResId != null) {
+            playLocalSound(fallbackAudioResId)
+        }
+    }
+
+    private fun transmitMetric(metric: Char, value: Int) {
+        val clampedDisplay = value.coerceIn(-100, 100)
+        val metricMsg = MetricChirp.message(metric, clampedDisplay)
+        val fullPayload = "$profileKey:$metricMsg"
+        transmitTelemetry(fullPayload, MetricChirp.resId(metric, clampedDisplay))
+    }
+
+    private fun playLocalSound(@RawRes resId: Int) {
+        try {
+            localAudioPlayer?.release()
+            localAudioPlayer = MediaPlayer.create(this, resId)?.apply {
+                setOnCompletionListener { mp -> mp.release() }
+                start()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error playing local audio: ${e.message}")
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         gestureDetector.start()
-        checkAndStartBle()
+        updateGibberLinkState()
+        checkAndStartPermissions()
     }
 
     override fun onPause() {
         gestureDetector.stop()
+        gibberLinkEngine.stopListening()
         super.onPause()
     }
 
@@ -221,25 +365,39 @@ class MainActivity : ComponentActivity() {
         mainHandler.removeCallbacks(hideInteractionRunnable)
         mainHandler.removeCallbacks(restoreEqualBrightnessRunnable)
         bleServer.stop()
-        chirpPlayer.release()
+        gibberLinkEngine.release()
+        localAudioPlayer?.release()
         super.onDestroy()
     }
 
-    private fun checkAndStartBle() {
+    private fun checkAndStartPermissions() {
+        val permissionsNeeded = mutableListOf<String>()
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val permissions = arrayOf(
-                android.Manifest.permission.BLUETOOTH_ADVERTISE,
-                android.Manifest.permission.BLUETOOTH_CONNECT
-            )
-            val missing = permissions.filter {
-                checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                permissionsNeeded.add(android.Manifest.permission.BLUETOOTH_ADVERTISE)
             }
-            if (missing.isNotEmpty()) {
-                requestPermissions(missing.toTypedArray(), 1001)
-                return
+            if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                permissionsNeeded.add(android.Manifest.permission.BLUETOOTH_CONNECT)
             }
         }
-        bleServer.start()
+
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+            != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionsNeeded.add(android.Manifest.permission.RECORD_AUDIO)
+        }
+
+        if (permissionsNeeded.isNotEmpty()) {
+            requestPermissions(permissionsNeeded.toTypedArray(), 1001)
+        } else {
+            bleServer.start()
+            updateGibberLinkState()
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -251,64 +409,8 @@ class MainActivity : ComponentActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 1001) {
             bleServer.start()
+            updateGibberLinkState()
         }
-    }
-
-    private fun cycleMetricFocus() {
-        metricIndex = (metricIndex + 1) % metrics.size
-        markFocusAdjusting()
-    }
-
-    @Suppress("RestrictedApi")
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (isStemKey(event.keyCode) || event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_HOME) {
-            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                cycleMetricFocus()
-            }
-            return true
-        }
-        return super.dispatchKeyEvent(event)
-    }
-
-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        if (isStemKey(keyCode) || keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_HOME) {
-            if (event?.repeatCount == 0) {
-                cycleMetricFocus()
-            }
-            return true
-        }
-        return super.onKeyDown(keyCode, event)
-    }
-
-    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
-        if (isStemKey(keyCode) || keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_HOME) {
-            return true
-        }
-        return super.onKeyUp(keyCode, event)
-    }
-
-    override fun onKeyShortcut(keyCode: Int, event: KeyEvent?): Boolean {
-        if (isStemKey(keyCode) || keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_HOME) {
-            cycleMetricFocus()
-            return true
-        }
-        return super.onKeyShortcut(keyCode, event)
-    }
-
-    private fun isStemKey(keyCode: Int): Boolean {
-        return keyCode == KeyEvent.KEYCODE_STEM_PRIMARY ||
-                keyCode == KeyEvent.KEYCODE_STEM_1 ||
-                keyCode == KeyEvent.KEYCODE_STEM_2 ||
-                keyCode == KeyEvent.KEYCODE_STEM_3 ||
-                keyCode == KeyEvent.KEYCODE_APP_SWITCH ||
-                keyCode == KeyEvent.KEYCODE_NAVIGATE_NEXT ||
-                keyCode == KeyEvent.KEYCODE_NAVIGATE_PREVIOUS ||
-                keyCode == KeyEvent.KEYCODE_NAVIGATE_IN ||
-                keyCode == KeyEvent.KEYCODE_NAVIGATE_OUT ||
-                keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                keyCode == KeyEvent.KEYCODE_ENTER ||
-                keyCode == KeyEvent.KEYCODE_HOME ||
-                keyCode == KeyEvent.KEYCODE_BACK
     }
 
     override fun onGenericMotionEvent(event: MotionEvent?): Boolean {
@@ -323,44 +425,65 @@ class MainActivity : ComponentActivity() {
                 markInteraction()
                 val currentMetric = metrics[metricIndex]
                 val currentVal = metricValues[currentMetric] ?: 0
-                setMetricValue(currentMetric, currentVal + step, forcePlay = false)
+                setMetricValue(currentMetric, currentVal + step, transmit = true)
                 return true
             }
         }
         return super.onGenericMotionEvent(event)
     }
 
-    private fun setMetricValue(metric: Char, displayVal: Int, forcePlay: Boolean = false) {
+    private fun setMetricValue(metric: Char, displayVal: Int, transmit: Boolean = false) {
         val clampedDisplay = displayVal.coerceIn(-100, 100)
-        val oldDisplay = metricValues[metric] ?: 0
-
-        val oldQ = MetricChirp.quantize(oldDisplay)
-        val newQ = MetricChirp.quantize(clampedDisplay)
-
         metricValues[metric] = clampedDisplay
-        if (forcePlay || oldQ != newQ) {
-            chirpPlayer.playMetric(metric, clampedDisplay)
-            val msg = MetricChirp.message(metric, clampedDisplay)
-            bleServer.sendNotification(msg)
+
+        if (transmit) {
+            transmitMetric(metric, clampedDisplay)
         }
     }
 
-    private fun sendTap() {
-        flashCenter(Color(0xFF2ECC71)) // green center flash (persists)
-        chirpPlayer.play(R.raw.chirp_tap)
-        bleServer.sendNotification("TAP")
+    private fun cycleRatingType() {
+        metricIndex = (metricIndex + 1) % metrics.size
+        markInteraction()
+        hapticReminder.pulseSingle()
+        Log.i(TAG, "Cycled rating type via flick up to: ${metrics[metricIndex]}")
     }
 
-    private fun sendDoubleTap(hint: String?) {
-        flashCenter(Color(0xFFF1C40F)) // yellow center flash (persists)
-        chirpPlayer.play(R.raw.chirp_doubletap)
-        bleServer.sendNotification("DBL")
+    private fun cycleWidgetType() {
+        widgetTypeIndex = (widgetTypeIndex + 1) % widgetTypes.size
+        markInteraction()
+        hapticReminder.pulseDouble()
+        checkInSymbol = currentWidgetType
+        mainHandler.removeCallbacks(clearCheckInRunnable)
+        mainHandler.postDelayed(clearCheckInRunnable, CHECKIN_SHOW_MS)
+        Log.i(TAG, "Cycled widget type via swipe up to: $currentWidgetType")
+    }
+
+    private fun sendTap() {
+        flashCenter(Color(0xFF2ECC71))
+        hapticReminder.hapticGreen()
+        transmitTelemetry("$profileKey:TAP", R.raw.chirp_tap)
+    }
+
+    private fun sendDoubleTap() {
+        flashCenter(Color(0xFFF1C40F))
+        hapticReminder.hapticYellow()
+        transmitTelemetry("$profileKey:DBL", R.raw.chirp_doubletap)
     }
 
     private fun sendHold() {
-        flashCenter(Color(0xFFE74C3C)) // red center flash (persists)
-        chirpPlayer.play(R.raw.chirp_hold)
-        bleServer.sendNotification("HLD")
+        flashCenter(Color(0xFFE74C3C))
+        hapticReminder.hapticRed()
+        transmitTelemetry("$profileKey:HLD", R.raw.chirp_hold)
+    }
+
+    private fun sendWristRoll() {
+        flashCenter(Color.White)
+        hapticReminder.hapticWristRoll()
+        val e = metricValues[MetricChirp.ENJOYMENT] ?: 0
+        val h = metricValues[MetricChirp.HEAT] ?: 0
+        val n = metricValues[MetricChirp.ENDURANCE] ?: 0
+        val payload = "RATE:$profileKey:default:$e,$h,$n:${System.currentTimeMillis()}"
+        transmitTelemetry(payload, null) // no local chirp for now or fallback
     }
 }
 
@@ -389,6 +512,8 @@ private fun getRingColor(value: Int): Color {
 
 @Composable
 fun GibberWearScreen(
+    profileKey: String,
+    timerSec: Int,
     focusedMetricIndex: Int,
     enjoymentVal: Int,
     heatVal: Int,
@@ -400,17 +525,21 @@ fun GibberWearScreen(
     onSelectMetric: (Int) -> Unit,
     onRingTap: (Char, Int) -> Unit,
     onRingDrag: (Char, Int) -> Unit,
+    onRingRelease: (Char) -> Unit,
     onCentreTap: () -> Unit,
     onDoubleTap: () -> Unit,
     onLongPress: () -> Unit,
     onRotary: (Int) -> Unit,
+    onSwipeUp: () -> Unit,
     onCheckInTimerTrigger: () -> Unit
 ) {
-    // Local check-in reminder every 5 minutes
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(MainActivity.REMINDER_INTERVAL_MS)
-            onCheckInTimerTrigger()
+    LaunchedEffect(timerSec) {
+        if (timerSec > 0) {
+            val intervalMs = timerSec * 1000L
+            while (true) {
+                delay(intervalMs)
+                onCheckInTimerTrigger()
+            }
         }
     }
 
@@ -429,7 +558,6 @@ fun GibberWearScreen(
     val focusedVal = focusedTriple.second
     val formattedFocusedVal = if (focusedVal > 0) "+$focusedVal" else "$focusedVal"
 
-    // Ring stroke width = 44px
     val strokePx = 44f
 
     Box(
@@ -438,15 +566,6 @@ fun GibberWearScreen(
             .background(Color.Black)
             .focusRequester(focusRequester)
             .focusable()
-            .onPreviewKeyEvent { keyEvent ->
-                val nativeEvent = keyEvent.nativeKeyEvent
-                if (nativeEvent.action == KeyEvent.ACTION_DOWN && nativeEvent.repeatCount == 0) {
-                    onSelectMetric((focusedMetricIndex + 1) % 3)
-                    true
-                } else {
-                    false
-                }
-            }
             .onRotaryScrollEvent { event ->
                 val step = when {
                     event.verticalScrollPixels < 0 -> 1
@@ -464,7 +583,6 @@ fun GibberWearScreen(
                     val center = Offset(size.width / 2f, size.height / 2f)
                     val maxRadius = min(size.width, size.height) / 2f
 
-                    // Radii of 3 adjacent 44px wide rings
                     val r1Outer = maxRadius * 0.98f
                     val r1Center = r1Outer - strokePx / 2f
                     val r2Center = r1Center - strokePx
@@ -475,12 +593,11 @@ fun GibberWearScreen(
                     val dy = down.position.y - center.y
                     val dist = sqrt(dx * dx + dy * dy)
 
-                    // Touch boundary detection for 44px adjacent rings
                     val touchedMetricIndex = when {
-                        dist >= r1Center - strokePx / 2f -> 0 // Enjoyment (Outer)
-                        dist >= r2Center - strokePx / 2f -> 1 // Heat (Middle)
-                        dist >= innerCenterBoundary -> 2      // Endurance (Inner)
-                        else -> -1                             // Center area
+                        dist >= r1Center - strokePx / 2f -> 0
+                        dist >= r2Center - strokePx / 2f -> 1
+                        dist >= innerCenterBoundary -> 2
+                        else -> -1
                     }
 
                     var isDrag = false
@@ -515,7 +632,16 @@ fun GibberWearScreen(
                                 onRingDrag(metrics[touchedMetricIndex].first, v)
                             }
                         } else {
-                            if (!isDrag && !isLongPressFired) {
+                            if (isDrag && touchedMetricIndex != -1) {
+                                // Finger released after dragging: transmit final settled value!
+                                onRingRelease(metrics[touchedMetricIndex].first)
+                            } else if (isDrag && touchedMetricIndex == -1) {
+                                val totalDx = change.position.x - down.position.x
+                                val totalDy = change.position.y - down.position.y
+                                if (abs(totalDy) > abs(totalDx) && totalDy < -viewConfiguration.touchSlop) {
+                                    onSwipeUp()
+                                }
+                            } else if (!isLongPressFired) {
                                 if (touchedMetricIndex != -1) {
                                     onSelectMetric(touchedMetricIndex)
                                     val v = calculateValueFromAngle(dx, dy)
@@ -540,7 +666,6 @@ fun GibberWearScreen(
         Canvas(modifier = Modifier.fillMaxSize()) {
             val maxRadius = min(size.width, size.height) / 2f
 
-            // Calculate 44px adjacent radii with ZERO gap between rings
             val r1Outer = maxRadius * 0.98f
             val r1Center = r1Outer - strokePx / 2f
             val r2Center = r1Center - strokePx
@@ -555,14 +680,13 @@ fun GibberWearScreen(
                 val top = (size.height - diameter) / 2f
                 val stroke = Stroke(width = strokePx, cap = StrokeCap.Round)
 
-                // Alpha: dim unfocused rings while focus-adjusting; equal brightness when idle!
                 val alpha = if (isFocusAdjusting) {
                     if (isFocused) 1.0f else 0.25f
                 } else {
-                    1.0f // Equal brightness when restored
+                    1.0f
                 }
 
-                // 1. Track arc (dim background)
+                // 1. Track arc
                 drawArc(
                     color = Color(0xFF222222).copy(alpha = alpha),
                     startAngle = MainActivity.ARC_START,
@@ -573,7 +697,7 @@ fun GibberWearScreen(
                     style = stroke
                 )
 
-                // 2. Value arc: starts at 12:00 (270°), fills CW (+170°) for positive, CCW (-170°) for negative
+                // 2. Value arc
                 if (valInt != 0) {
                     val sweepFromNoon = 170f * (valInt / 100f)
                     drawArc(
@@ -587,7 +711,7 @@ fun GibberWearScreen(
                     )
                 }
 
-                // 3. Name centered at 12:00 and contained 100% WITHIN the 44px ring stroke
+                // 3. Name centered at 12:00 within stroke
                 val name = MetricChirp.name(metricChar).uppercase()
                 val nativeCanvas = drawContext.canvas.nativeCanvas
                 val centerX = size.width / 2f
@@ -601,7 +725,6 @@ fun GibberWearScreen(
                     this.isFakeBoldText = isFocused
                 }
 
-                // Render each letter rotated around center to 12:00 so characters NEVER overlap or pile up
                 val numChars = name.length
                 val charWidths = FloatArray(numChars)
                 textPaint.getTextWidths(name, charWidths)
@@ -625,8 +748,7 @@ fun GibberWearScreen(
             }
         }
 
-        // Inner center circle (flashes tap/doubletap/hold inside center only, persists)
-        // Dynamically sized to fit inside the inner 44px ring
+        // Inner center flash feedback
         val density = LocalDensity.current
         val maxRadius = min(384f, 384f) / 2f
         val r1Outer = maxRadius * 0.98f
@@ -643,6 +765,14 @@ fun GibberWearScreen(
                 .background(centerFlash ?: Color.Transparent),
             contentAlignment = Alignment.Center
         ) {
+            // Holds flash background
+        }
+
+        // Foreground text: drawn on top and allowed to expand across/over inner rings
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
@@ -651,7 +781,7 @@ fun GibberWearScreen(
                     Text(
                         text = checkInSymbol,
                         color = Color.White,
-                        fontSize = 28.sp,
+                        fontSize = 32.sp,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center
                     )
@@ -659,8 +789,18 @@ fun GibberWearScreen(
                     Text(
                         text = formattedFocusedVal,
                         color = Color.White,
-                        fontSize = 32.sp,
+                        fontSize = 36.sp,
                         fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                } else {
+                    // Profile key only - bold and layered on top of rings
+                    Text(
+                        text = profileKey.uppercase(),
+                        color = Color.White,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 2.sp,
                         textAlign = TextAlign.Center
                     )
                 }
@@ -686,6 +826,8 @@ private fun calculateValueFromAngle(dx: Float, dy: Float): Int {
 fun GibberWearPreviewOverview() {
     MaterialTheme {
         GibberWearScreen(
+            profileKey = "adam",
+            timerSec = 0,
             focusedMetricIndex = 0,
             enjoymentVal = 70,
             heatVal = 50,
@@ -697,110 +839,12 @@ fun GibberWearPreviewOverview() {
             onSelectMetric = {},
             onRingTap = { _, _ -> },
             onRingDrag = { _, _ -> },
+            onRingRelease = {},
             onCentreTap = {},
             onDoubleTap = {},
             onLongPress = {},
             onRotary = {},
-            onCheckInTimerTrigger = {}
-        )
-    }
-}
-
-@Preview(device = "id:wearos_small_round", showBackground = true, backgroundColor = 0xFF000000)
-@Composable
-fun GibberWearPreviewEnjoymentAdjusting() {
-    MaterialTheme {
-        GibberWearScreen(
-            focusedMetricIndex = 0,
-            enjoymentVal = 75,
-            heatVal = 40,
-            enduranceVal = 20,
-            centerFlash = null,
-            checkInSymbol = null,
-            isInteracting = true,
-            isFocusAdjusting = true,
-            onSelectMetric = {},
-            onRingTap = { _, _ -> },
-            onRingDrag = { _, _ -> },
-            onCentreTap = {},
-            onDoubleTap = {},
-            onLongPress = {},
-            onRotary = {},
-            onCheckInTimerTrigger = {}
-        )
-    }
-}
-
-@Preview(device = "id:wearos_small_round", showBackground = true, backgroundColor = 0xFF000000)
-@Composable
-fun GibberWearPreviewHeatAdjusting() {
-    MaterialTheme {
-        GibberWearScreen(
-            focusedMetricIndex = 1,
-            enjoymentVal = 60,
-            heatVal = 85,
-            enduranceVal = 40,
-            centerFlash = null,
-            checkInSymbol = null,
-            isInteracting = true,
-            isFocusAdjusting = true,
-            onSelectMetric = {},
-            onRingTap = { _, _ -> },
-            onRingDrag = { _, _ -> },
-            onCentreTap = {},
-            onDoubleTap = {},
-            onLongPress = {},
-            onRotary = {},
-            onCheckInTimerTrigger = {}
-        )
-    }
-}
-
-@Preview(device = "id:wearos_small_round", showBackground = true, backgroundColor = 0xFF000000)
-@Composable
-fun GibberWearPreviewCheckInTimer() {
-    MaterialTheme {
-        GibberWearScreen(
-            focusedMetricIndex = 0,
-            enjoymentVal = 70,
-            heatVal = 50,
-            enduranceVal = 30,
-            centerFlash = null,
-            checkInSymbol = "✓  ⏱",
-            isInteracting = false,
-            isFocusAdjusting = false,
-            onSelectMetric = {},
-            onRingTap = { _, _ -> },
-            onRingDrag = { _, _ -> },
-            onCentreTap = {},
-            onDoubleTap = {},
-            onLongPress = {},
-            onRotary = {},
-            onCheckInTimerTrigger = {}
-        )
-    }
-}
-
-@Preview(device = "id:wearos_small_round", showBackground = true, backgroundColor = 0xFF000000)
-@Composable
-fun GibberWearPreviewTapFlash() {
-    MaterialTheme {
-        GibberWearScreen(
-            focusedMetricIndex = 0,
-            enjoymentVal = 70,
-            heatVal = 50,
-            enduranceVal = 30,
-            centerFlash = Color(0xFF2ECC71),
-            checkInSymbol = null,
-            isInteracting = false,
-            isFocusAdjusting = false,
-            onSelectMetric = {},
-            onRingTap = { _, _ -> },
-            onRingDrag = { _, _ -> },
-            onCentreTap = {},
-            onDoubleTap = {},
-            onLongPress = {},
-            onRotary = {},
+            onSwipeUp = {},
             onCheckInTimerTrigger = {}
         )
     }
