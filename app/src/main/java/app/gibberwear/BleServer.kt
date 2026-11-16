@@ -100,7 +100,11 @@ class BleServer(
                 gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
             }
 
-            val payload = value?.toString(Charsets.UTF_8)?.trim() ?: return
+            val payload = value?.toString(Charsets.UTF_8)
+                ?.replace("\u0000", "")
+                ?.trim()
+                ?: return
+            if (payload.isEmpty()) return
             Log.i(TAG, "Received BLE write payload: $payload")
             mainHandler.post { onMessageReceived(payload) }
         }

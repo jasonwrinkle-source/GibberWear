@@ -1,7 +1,7 @@
 # GibberLink Protocol & Provisioning Specification
 **Target Systems:** GibberWear (Wear OS Smartwatch) $\leftrightarrow$ Muse (Companion App / Web Client)  
-**Document Version:** 1.0  
-**Status:** Draft for Coordination & Implementation Alignment  
+**Document Version:** 1.1  
+**Status:** Aligned with the GibberWear watch, 2026-11-15  
 
 ---
 
@@ -31,19 +31,41 @@ Format: `<UID>:<GESTURE>`
 
 | Gesture Trigger | Payload Example (`UID=J1`) | Meaning |
 | :--- | :--- | :--- |
-| **Tap** (Center touch or wrist shake) | `J1:TAP` | Primary confirmation / check-in acknowledge |
-| **Double Tap** (Center or wrist flip) | `J1:DBL` | Secondary signal |
-| **Hold** (Long press or sustained shake) | `J1:HLD` | Hold / stop / alert |
+| **Tap** (Center touch or wrist flip) | `J1:TAP` | Green — all good |
+| **Double Tap** (Center or shake) | `J1:DBL` | Yellow — caution / mixed |
+| **Hold** (Long press or vigorous shake) | `J1:HLD` | Red — stop |
 
-#### 2. Continuous Metric State Tracking
-Format: `<UID>:<METRIC><VALUE>`  
-*Values are quantized to 10s between `-100` and `+100` (or `0` to `100`), where `+` can be omitted or explicit.*
+#### 2. Rating commit (wrist roll)
 
-| Metric Dimension | Key | Payload Example (`UID=J1`) | Notes |
-| :--- | :--- | :--- | :--- |
-| **Enjoyment** | `E` | `J1:E80` or `J1:E-20` | Outer ring arc |
-| **Heat / Intensity** | `H` | `J1:H60` | Middle ring arc |
-| **Endurance / Capacity** | `N` | `J1:N40` | Inner ring arc |
+Taps, drags, and crown turns only edit a draft on the watch. The draft is sent once, on a deliberate wrist roll.
+
+Format: `RATE:<UID>:<TOPIC_ID>:<VALUES>:<TIMESTAMP_MS>`
+
+- `<VALUES>` is a comma-separated list, one integer per pole of the widget on screen, pole 0 first.
+- One ring, two rings, three rings, and the switchbox (`W2`) use `-100..+100`.
+- The triad simplex (`W3`) and the radar widgets (`W4` through `W8`) use `0..100`.
+- `<TOPIC_ID>` is the topic from the last `PROG`. Swiping to another widget on the watch itself uses the placeholder `debug-widget-cycle`.
+
+Three-ring example (enjoyment, heat, endurance):
+
+```text
+RATE:eve:top-kink-impact:80,60,-20:1731638415200
+```
+
+Those three poles are not sent as separate `E` / `H` / `N` chirps on each crown detent.
+
+#### 3. Compact ultrasound form of the same commit
+
+```text
+R:<UID>:<HASH4>:<HEX_VALUES>
+```
+
+- `<HASH4>` is the low 16 bits of FNV-1a over `<TOPIC_ID>`, four uppercase hex characters.
+- Each pole is one hex nibble (`0`..`F`).
+- On a `0..100` widget, `0` is nibble `0` and `100` is nibble `F`.
+- On a `-100..+100` widget, `-100` is nibble `0`, `0` is nibble `8`, and `+100` is nibble `F`.
+
+The `RATE` line goes out over BLE and is also played as an ultrasound chirp. `ACK:<key>:CFG` is played the same way: GGWave protocol `p=4` (ultrasound fast), 48 kHz mono, encode volume 70. The microphone is paused while the chirp plays, then listening starts again.
 
 ---
 
@@ -79,21 +101,49 @@ Format: `LPM:<STATE>`
 
 ---
 
-### C. Device Provisioning / Programming Setup (Muse $\rightarrow$ Watch)
+### D. Rating prompt (Muse $\rightarrow$ Watch)
+
+Format: `PROG:<TARGET_UID>:<TOPIC_ID>:<WIDGET>:<TIMEOUT_SEC>`
+
+The watch shows `<WIDGET>`, stores `<TOPIC_ID>` for the next wrist roll, and clears the draft. `<TARGET_UID>` must be `ALL` or the provisioned key. `<TIMEOUT_SEC>` is accepted and not yet used to dismiss the widget.
+
+| Widget code | Layout |
+| :--- | :--- |
+| `W1`, `R1`, `W1X1` | 1 concentric ring |
+| `W1X2`, `R2` | 2 concentric rings |
+| `W1X3`, `R3` | 3 concentric rings (enjoyment, heat, endurance) |
+| `W2` | Split switchbox |
+| `W3` | Barycentric triad |
+| `W4` .. `W8` | Tetrad, pentad, hexad, heptad, octad |
+
+*Example:* `PROG:eve:top-dietary-heptad:W7:90`
+
+### E. Device Provisioning / Programming Setup (Muse $\rightarrow$ Watch)
 
 Used during initial onboarding or pairing to configure the watch without physical UI entry.
 
-Format: `CFG:<UID>:<DISPLAY_NAME>:<TIMER_SEC>`
+Muse sends this today:
+
+```text
+CFG:<KEY>:<TIMER_SEC>
+```
+
+Also accepted, when the middle field is not an integer:
+
+```text
+CFG:<KEY>:<DISPLAY_NAME>:<TIMER_SEC>
+```
 
 | Parameter | Type / Constraints | Description |
 | :--- | :--- | :--- |
-| `<UID>` | 1–4 Alphanumeric characters | Unique short identifier (e.g. `A1`, `SUB1`, `04`). |
-| `<DISPLAY_NAME>` | 1–10 ASCII characters | Display name shown on the watch face (e.g. `Jason`, `Alex`). |
-| `<TIMER_SEC>` | Integer (Seconds) | **`0`** = **Disabled** (Watch strictly relies on external signals).<br>**`> 0`** = Autonomous fallback reminder interval (e.g. `300` = 5 min). |
+| `<KEY>` | Short ASCII key | Profile key the watch puts on every outgoing payload (e.g. `eve`, `adam`). |
+| `<DISPLAY_NAME>` | Optional ASCII | Accepted in the longer form. Not shown on the watch yet. |
+| `<TIMER_SEC>` | Integer (seconds) | **`0`** disables the local reminder.<br>**`> 0`** is the reminder interval (e.g. `300` = 5 min). |
 
 *Examples:*
-- `CFG:J1:Jason:0` $\rightarrow$ Sets ID to `J1`, name to `Jason`, **disables** autonomous timer (purely reactive).
-- `CFG:A2:Sam:600` $\rightarrow$ Sets ID to `A2`, name to `Sam`, activates a 10-minute local reminder timer.
+- `CFG:eve:300` $\rightarrow$ Key `eve`, 5-minute local reminder.
+- `CFG:eve:0` $\rightarrow$ Key `eve`, reminders only when Muse sends `CHK`.
+- `CFG:J1:Jason:0` $\rightarrow$ Key `J1`, timer off. `Jason` is ignored until the face shows a display name.
 
 #### Provisioning Handshake Acknowledgment (Watch $\rightarrow$ Muse)
 When the watch successfully parses and persists the `CFG` message, it immediately emits:
@@ -111,7 +161,7 @@ stateDiagram-v2
     [*] --> Unprovisioned: App First Launch
     
     Unprovisioned --> Unprovisioned: Receive Non-matching Signals (Ignored)
-    Unprovisioned --> Provisioned: Receive CFG:<UID>:<NAME>:<TIMER_SEC>
+    Unprovisioned --> Provisioned: Receive CFG:<KEY>:<TIMER_SEC>
     
     state Provisioned {
         [*] --> IdleListening
@@ -122,8 +172,8 @@ stateDiagram-v2
         IdleListening --> AutonomousTimer: If TIMER_SEC > 0 and timeout elapsed
         AutonomousTimer --> IdleListening: Haptic double pulse (✓ ⏱)
         
-        IdleListening --> Transmitting: Screen Tap / Crown / Wrist Gesture
-        Transmitting --> IdleListening: Emit <UID>:<SIGNAL> chirp & BLE
+        IdleListening --> Transmitting: Tap, flip, shake, hold, or wrist roll
+        Transmitting --> IdleListening: Emit TAP / DBL / HLD, or RATE on a roll
     }
     
     Provisioned --> Provisioned: Receive new CFG (Overrides config)
@@ -147,8 +197,8 @@ stateDiagram-v2
 ### Channel 2: Bluetooth Low Energy (Fallback & Redundancy)
 - **Service UUID:** `0000FFF0-0000-1000-8000-00805F9B34FB` (GibberLink BLE Service)
 - **Characteristics:**
-  - **Telemetry TX (Notify):** Emits outgoing attributed payloads (`J1:TAP`, `J1:E80`).
-  - **Control RX (Write):** Accepts incoming commands (`CFG:...`, `CHK:...`).
+  - **Telemetry TX (Notify):** Emits outgoing attributed payloads (`eve:TAP`, `RATE:eve:...`).
+  - **Control RX (Write):** Accepts incoming commands (`CFG:...`, `CHK:...`, `LPM:...`, `PROG:...`).
 - Payload parsing logic is identical between GibberLink and BLE.
 
 ---
@@ -163,4 +213,4 @@ Before finalizing implementation, please confirm the following protocol details:
    - *Option A (Recommended):* Embed GGWave native C++ library via NDK on the watch to synthesize dynamic `<UID>:...` WAV audio in real time.
    - *Option B:* Muse sends pre-computed sound tokens or restricts UIDs to a fixed static table.
 4. [ ] **Microphone Duty-Cycle:** Does Muse expect the watch to continuously listen in the foreground, or only during active sessions / pairing modes to preserve watch battery?
-5. [ ] **Confirmation Handshake:** Confirm if Muse expects `ACK:<UID>:CFG` ultrasonic chirp response upon provisioning completion.
+5. [x] **Confirmation Handshake:** The watch sends `ACK:<key>:CFG` over ultrasound and BLE after it saves a `CFG` message.

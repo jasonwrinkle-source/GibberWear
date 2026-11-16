@@ -1,47 +1,15 @@
 package app.gibberwear
 
+import android.annotation.SuppressLint
 import androidx.annotation.RawRes
 
 /**
- * Metric-value chirp format (GibberWear v2).
- *
- * A metric value is sent as a short GGWave message (protocol p=4, ultrasound
- * fast — the same protocol as the v1 TAP / DBL / HLD chirps):
- *
- *     <metric letter><value -100 to +100>
- *
- * Metric letters:
- *   E = enjoyment
- *   H = heat / arousal
- *   N = endurance (willingness to endure an activity for someone else)
- *
- * Examples: "E-100" = enjoyment -100, "E0" = enjoyment 0, "H70" = heat +70.
- *
- * Values are quantised to multiples of 10 (-100, -90, ..., 0, ..., +100).
- * Pre-generated WAVs in res/raw are named chirp_<metric>_m<val>.wav for negatives
- * (e.g. chirp_e_m100.wav) and chirp_<metric><val>.wav for non-negatives
- * (e.g. chirp_e0.wav, chirp_e70.wav).
+ * GibberLink payload encoder and audio fallback mapping.
  */
 object MetricChirp {
 
-    const val ENJOYMENT = 'E'
-    const val HEAT = 'H'
-    const val ENDURANCE = 'N'
-
     /** Values are quantised to multiples of this step before sending. */
     const val STEP = 10
-
-    /** Human-readable name for a metric letter. */
-    fun name(metric: Char): String = when (metric) {
-        ENJOYMENT -> "Enjoyment"
-        HEAT -> "Heat"
-        ENDURANCE -> "Endurance"
-        else -> "?"
-    }
-
-    /** The message string that goes out over GGWave, e.g. "E-100" or "E70". */
-    fun message(metric: Char, value: Int): String =
-        "$metric${quantize(value)}"
 
     /** Round a -100..+100 value to the nearest multiple of STEP (10). */
     fun quantize(value: Int): Int {
@@ -54,81 +22,58 @@ object MetricChirp {
         return rounded.coerceIn(-100, 100)
     }
 
-    /** The pre-generated WAV resource for a metric letter + value. */
+    /**
+     * Returns the raw resource ID for the given metric and value.
+     */
+    @SuppressLint("DiscouragedApi")
     @RawRes
-    fun resId(metric: Char, value: Int): Int {
+    fun resId(context: android.content.Context, metric: Char, value: Int): Int {
         val q = quantize(value)
-        return when (metric.uppercaseChar()) {
-            ENJOYMENT -> when (q) {
-                -100 -> R.raw.chirp_e_m100
-                -90 -> R.raw.chirp_e_m90
-                -80 -> R.raw.chirp_e_m80
-                -70 -> R.raw.chirp_e_m70
-                -60 -> R.raw.chirp_e_m60
-                -50 -> R.raw.chirp_e_m50
-                -40 -> R.raw.chirp_e_m40
-                -30 -> R.raw.chirp_e_m30
-                -20 -> R.raw.chirp_e_m20
-                -10 -> R.raw.chirp_e_m10
-                0 -> R.raw.chirp_e0
-                10 -> R.raw.chirp_e10
-                20 -> R.raw.chirp_e20
-                30 -> R.raw.chirp_e30
-                40 -> R.raw.chirp_e40
-                50 -> R.raw.chirp_e50
-                60 -> R.raw.chirp_e60
-                70 -> R.raw.chirp_e70
-                80 -> R.raw.chirp_e80
-                90 -> R.raw.chirp_e90
-                else -> R.raw.chirp_e100
-            }
-            HEAT -> when (q) {
-                -100 -> R.raw.chirp_h_m100
-                -90 -> R.raw.chirp_h_m90
-                -80 -> R.raw.chirp_h_m80
-                -70 -> R.raw.chirp_h_m70
-                -60 -> R.raw.chirp_h_m60
-                -50 -> R.raw.chirp_h_m50
-                -40 -> R.raw.chirp_h_m40
-                -30 -> R.raw.chirp_h_m30
-                -20 -> R.raw.chirp_h_m20
-                -10 -> R.raw.chirp_h_m10
-                0 -> R.raw.chirp_h0
-                10 -> R.raw.chirp_h10
-                20 -> R.raw.chirp_h20
-                30 -> R.raw.chirp_h30
-                40 -> R.raw.chirp_h40
-                50 -> R.raw.chirp_h50
-                60 -> R.raw.chirp_h60
-                70 -> R.raw.chirp_h70
-                80 -> R.raw.chirp_h80
-                90 -> R.raw.chirp_h90
-                else -> R.raw.chirp_h100
-            }
-            ENDURANCE -> when (q) {
-                -100 -> R.raw.chirp_n_m100
-                -90 -> R.raw.chirp_n_m90
-                -80 -> R.raw.chirp_n_m80
-                -70 -> R.raw.chirp_n_m70
-                -60 -> R.raw.chirp_n_m60
-                -50 -> R.raw.chirp_n_m50
-                -40 -> R.raw.chirp_n_m40
-                -30 -> R.raw.chirp_n_m30
-                -20 -> R.raw.chirp_n_m20
-                -10 -> R.raw.chirp_n_m10
-                0 -> R.raw.chirp_n0
-                10 -> R.raw.chirp_n10
-                20 -> R.raw.chirp_n20
-                30 -> R.raw.chirp_n30
-                40 -> R.raw.chirp_n40
-                50 -> R.raw.chirp_n50
-                60 -> R.raw.chirp_n60
-                70 -> R.raw.chirp_n70
-                80 -> R.raw.chirp_n80
-                90 -> R.raw.chirp_n90
-                else -> R.raw.chirp_n100
-            }
-            else -> R.raw.chirp_e0
+        val m = metric.lowercaseChar()
+        val suffix = if (q < 0) "_m${-q}" else "$q"
+        val name = "chirp_${m}${suffix}"
+        return context.resources.getIdentifier(name, "raw", context.packageName)
+    }
+
+    /**
+     * High-density ultrasound payload.
+     * Format: R:<KEY>:<HASH4>:<HEX_VALUES>
+     *
+     * HASH4 is the low 16 bits of FNV-1a over the topic id.
+     * Each pole is one hex nibble (0..15).
+     * Unipolar widgets (0..100) map 0 to 0 and 100 to 15.
+     * Bipolar widgets (-100..+100) map -100 to 0, 0 to 8, and +100 to 15.
+     */
+    fun encodeHighDensity(
+        profileKey: String,
+        topicId: String,
+        poleValues: IntArray,
+        poleCount: Int,
+        bipolar: Boolean
+    ): String {
+        val hexBuilder = StringBuilder()
+        for (i in 0 until poleCount) {
+            val raw = poleValues.getOrElse(i) { 0 }
+            val nibble = if (bipolar) {
+                val v = raw.coerceIn(-100, 100)
+                ((v + 100) * 15 + 100) / 200
+            } else {
+                val v = raw.coerceIn(0, 100)
+                (v * 15 + 50) / 100
+            }.coerceIn(0, 15)
+            hexBuilder.append(nibble.toString(16).uppercase())
         }
+        return "R:$profileKey:${topicHash(topicId)}:$hexBuilder"
+    }
+
+    /** 4-hex-char FNV-1a fold of the topic id. */
+    fun topicHash(topicId: String): String {
+        var hash = 2166136261u
+        for (b in topicId.toByteArray(Charsets.UTF_8)) {
+            hash = hash xor b.toUByte().toUInt()
+            hash *= 16777619u
+        }
+        val folded = (hash xor (hash shr 16)) and 0xFFFFu
+        return folded.toString(16).uppercase().padStart(4, '0')
     }
 }

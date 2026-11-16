@@ -34,21 +34,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import app.gibberwear.ui.*
-import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.atan2
 import kotlin.math.min
 import kotlin.math.sqrt
 
@@ -63,9 +61,8 @@ class MainActivity : ComponentActivity() {
         const val PREF_LPM = "low_power_mode"
         const val DEFAULT_PROFILE_KEY = "adam"
 
-        const val ARC_START = 100f
-        const val ARC_SWEEP = 340f
         const val CHECKIN_SHOW_MS = 3000L
+        const val PLACEHOLDER_TOPIC = "debug-widget-cycle"
         const val INTERACTION_HIDE_MS = 1500L
         const val FOCUS_DIM_TIMEOUT_MS = 3000L
     }
@@ -91,9 +88,10 @@ class MainActivity : ComponentActivity() {
     private var widgetTypeIndex by mutableStateOf(widgetTypes.indexOf(WidgetType.W3_RINGS).coerceAtLeast(0))
     private val currentWidgetType get() = widgetTypes[widgetTypeIndex]
 
-    // Generalized N-Pole State
+    // Draft pole values. Nothing is transmitted until a wrist roll.
     private var poleValues by mutableStateOf(IntArray(8) { 0 })
     private var focusedPoleIndex by mutableStateOf(0)
+    private var activeTopicId by mutableStateOf(PLACEHOLDER_TOPIC)
 
     private var centerFlash by mutableStateOf<Color?>(null)
     private var checkInSymbol by mutableStateOf<String?>(null)
@@ -150,7 +148,9 @@ class MainActivity : ComponentActivity() {
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        profileKey = prefs.getString(PREF_PROFILE_KEY, DEFAULT_PROFILE_KEY) ?: DEFAULT_PROFILE_KEY
+        profileKey = (prefs.getString(PREF_PROFILE_KEY, DEFAULT_PROFILE_KEY) ?: DEFAULT_PROFILE_KEY)
+            .replace("\u0000", "")
+            .ifEmpty { DEFAULT_PROFILE_KEY }
         timerSec = prefs.getInt(PREF_TIMER_SEC, 0)
         isLowPowerMode = prefs.getBoolean(PREF_LPM, false)
 
@@ -174,8 +174,8 @@ class MainActivity : ComponentActivity() {
 
         gestureDetector = WristGestureDetector(
             context = this,
-            onFlickUp = { cycleRatingType(1) },
-            onFlickDown = { cycleRatingType(-1) },
+            onFlickUp = { sendTap() },
+            onFlickDown = { sendTap() },
             onShake = { sendDoubleTap() },
             onSustainedShake = { sendHold() },
             onWristRoll = { sendWristRoll() }
@@ -200,23 +200,31 @@ class MainActivity : ComponentActivity() {
                     },
                     onPoleTap = { idx, v ->
                         markInteraction()
-                        setPoleValue(idx, v, transmit = true)
+                        setPoleValue(idx, v)
                     },
                     onPoleDrag = { idx, v ->
                         markInteraction()
-                        setPoleValue(idx, v, transmit = false)
+                        setPoleValue(idx, v)
                     },
-                    onPoleRelease = { _ ->
+                    onSimplex = { weights ->
                         markInteraction()
-                        transmitAllPoles()
+                        setPoles(weights)
+                        focusedPoleIndex = weights.indices.maxBy { weights[it] }
                     },
+                    onPoleRelease = { markInteraction() },
                     onCentreTap = { sendTap() },
                     onDoubleTap = { sendDoubleTap() },
+                    onToggleTriad = { toggleTriadLayout() },
                     onLongPress = { sendHold() },
                     onRotary = { delta ->
                         markInteraction()
+                        markFocusAdjusting()
                         val currentVal = poleValues[focusedPoleIndex]
-                        setPoleValue(focusedPoleIndex, currentVal + delta, transmit = true)
+                        setPoleValue(
+                            focusedPoleIndex,
+                            currentVal + delta,
+                            renormalizeSimplex = currentWidgetType == WidgetType.W3_SIMPLEX
+                        )
                     },
                     onSwipeUp = { cycleWidgetType(1) },
                     onSwipeDown = { cycleWidgetType(-1) },
@@ -227,16 +235,27 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIncomingMessage(raw: String) {
-        val msg = raw.trim()
+        // BLE writes and decoded chirps sometimes include a C-string NUL.
+        // Leave it in and the next ACK encodes that byte and native ggwave crashes.
+        val stripped = raw.replace("\u0000", "")
+        if (stripped.length != raw.length) {
+            Log.w(TAG, "Incoming message contained a NUL; stripped before parsing")
+        }
+        val msg = stripped.trim()
         Log.i(TAG, "Incoming message: $msg")
         markTransceiving()
 
         when {
             msg.startsWith("CFG:") -> {
+                // Live Muse sends CFG:<key>:<timer>. The longer form is CFG:<key>:<name>:<timer>.
                 val parts = msg.split(":")
                 if (parts.size >= 3) {
                     val newKey = parts[1].trim()
-                    val newTimerSec = parts[2].trim().toIntOrNull() ?: 0
+                    val newTimerSec = if (parts.size >= 4 && parts[2].toIntOrNull() == null) {
+                        parts[3].trim().toIntOrNull() ?: 0
+                    } else {
+                        parts[2].trim().toIntOrNull() ?: 0
+                    }
                     if (newKey.isNotEmpty()) {
                         profileKey = newKey
                         timerSec = newTimerSec
@@ -248,6 +267,27 @@ class MainActivity : ComponentActivity() {
 
                         val ackMsg = "ACK:$newKey:CFG"
                         transmitTelemetry(ackMsg)
+                    }
+                }
+            }
+
+            msg.startsWith("PROG:") -> {
+                // PROG:<TARGET>:<TOPIC_ID>:<WIDGET>:<TIMEOUT_SEC>
+                val parts = msg.split(":")
+                if (parts.size >= 4) {
+                    val target = parts[1].trim()
+                    val topic = parts[2].trim()
+                    val widget = WidgetType.fromCode(parts[3].trim())
+                    val isTarget = target.equals("ALL", ignoreCase = true) ||
+                            target.equals(profileKey, ignoreCase = true)
+                    if (isTarget && topic.isNotEmpty() && widget != null) {
+                        activeTopicId = topic
+                        showWidget(widget, resetTopic = false, clearValues = true)
+                        hapticReminder.pulseDouble()
+                        checkInSymbol = widget.label
+                        mainHandler.removeCallbacks(clearCheckInRunnable)
+                        mainHandler.postDelayed(clearCheckInRunnable, CHECKIN_SHOW_MS)
+                        Log.i(TAG, "PROG topic=$topic widget=${widget.label}")
                     }
                 }
             }
@@ -336,6 +376,7 @@ class MainActivity : ComponentActivity() {
         mainHandler.removeCallbacks(clearCheckInRunnable)
         mainHandler.removeCallbacks(hideInteractionRunnable)
         mainHandler.removeCallbacks(restoreEqualBrightnessRunnable)
+        mainHandler.removeCallbacks(hideTransceivingRunnable)
         bleServer.stop()
         gibberLinkEngine.release()
         localAudioPlayer?.release()
@@ -391,52 +432,123 @@ class MainActivity : ComponentActivity() {
             if (delta != 0f) {
                 val step = if (delta > 0) 5 else -5
                 markInteraction()
+                markFocusAdjusting()
                 val currentVal = poleValues[focusedPoleIndex]
-                setPoleValue(focusedPoleIndex, currentVal + step, transmit = true)
+                setPoleValue(
+                    focusedPoleIndex,
+                    currentVal + step,
+                    renormalizeSimplex = currentWidgetType == WidgetType.W3_SIMPLEX
+                )
                 return true
             }
         }
         return super.onGenericMotionEvent(event)
     }
 
-    private fun setPoleValue(poleIndex: Int, displayVal: Int, transmit: Boolean = false) {
-        val clampedDisplay = displayVal.coerceIn(-100, 100)
-        val newValues = poleValues.copyOf()
-        newValues[poleIndex] = clampedDisplay
-        poleValues = newValues
+    private fun setPoleValue(poleIndex: Int, displayVal: Int, renormalizeSimplex: Boolean = false) {
+        val type = currentWidgetType
+        if (poleIndex !in 0 until type.poleCount) return
+        val next = poleValues.copyOf()
+        next[poleIndex] = displayVal.coerceIn(type.minValue, type.maxValue)
+        if (renormalizeSimplex && type == WidgetType.W3_SIMPLEX) {
+            normalizeSimplexAround(next, poleIndex)
+        }
+        poleValues = next
+    }
 
-        if (transmit) {
-            transmitAllPoles()
+    private fun setPoles(values: IntArray) {
+        val type = currentWidgetType
+        val next = poleValues.copyOf()
+        for (i in values.indices) {
+            if (i < type.poleCount) {
+                next[i] = values[i].coerceIn(type.minValue, type.maxValue)
+            }
+        }
+        poleValues = next
+    }
+
+    private fun showWidget(type: WidgetType, resetTopic: Boolean, clearValues: Boolean) {
+        widgetTypeIndex = widgetTypes.indexOf(type).coerceAtLeast(0)
+        focusedPoleIndex = 0
+        if (resetTopic) activeTopicId = PLACEHOLDER_TOPIC
+        val next = if (clearValues) IntArray(8) else poleValues.copyOf()
+        for (i in next.indices) {
+            next[i] = next[i].coerceIn(type.minValue, type.maxValue)
+        }
+        if (type == WidgetType.W3_SIMPLEX && !clearValues) {
+            scaleSimplexTo100(next)
+        }
+        poleValues = next
+    }
+
+    private fun toggleTriadLayout() {
+        val target = if (currentWidgetType == WidgetType.W3_RINGS) {
+            WidgetType.W3_SIMPLEX
+        } else {
+            WidgetType.W3_RINGS
+        }
+        showWidget(target, resetTopic = false, clearValues = false)
+        hapticReminder.pulseSingle()
+        Log.i(TAG, "Toggled triad layout to ${target.label}")
+    }
+
+    /** Keep a simplex composition summing to 100 after the crown moves one pole. */
+    private fun normalizeSimplexAround(values: IntArray, locked: Int) {
+        val remain = (100 - values[locked]).coerceAtLeast(0)
+        val others = (0 until 3).filter { it != locked }
+        val otherSum = others.sumOf { values[it].coerceAtLeast(0) }
+        if (otherSum <= 0) {
+            val each = remain / others.size
+            var extra = remain - each * others.size
+            others.forEach { index ->
+                values[index] = each + if (extra > 0) 1 else 0
+                if (extra > 0) extra--
+            }
+        } else {
+            others.forEach { index ->
+                values[index] = values[index].coerceAtLeast(0) * remain / otherSum
+            }
+            var extra = remain - others.sumOf { values[it] }
+            val order = others.sortedByDescending { values[it] }
+            var k = 0
+            while (extra > 0 && order.isNotEmpty()) {
+                values[order[k % order.size]]++
+                extra--
+                k++
+            }
         }
     }
 
-    private fun transmitAllPoles() {
-        val poleCount = currentWidgetType.poleCount
-        val valuesStr = poleValues.take(poleCount).joinToString(",")
-        val topicId = "debug-widget-cycle" // Placeholder for debug manual cycling
-
-        val payload = "RATE:$profileKey:$topicId:$valuesStr:${System.currentTimeMillis()}"
-        transmitTelemetry(payload, null)
-    }
-
-    private fun cycleRatingType(direction: Int = 1) {
-        val count = currentWidgetType.poleCount
-        focusedPoleIndex = (focusedPoleIndex + direction % count + count) % count
-        markInteraction()
-        hapticReminder.pulseSingle()
-        Log.i(TAG, "Cycled rating focus via flick to index: $focusedPoleIndex")
+    private fun scaleSimplexTo100(values: IntArray) {
+        val sum = (0 until 3).sumOf { values[it].coerceAtLeast(0) }
+        if (sum <= 0) {
+            values[0] = 34
+            values[1] = 33
+            values[2] = 33
+            return
+        }
+        val scaled = IntArray(3) { values[it].coerceAtLeast(0) * 100 / sum }
+        var extra = 100 - scaled.sum()
+        val order = (0..2).sortedByDescending { values[it].coerceAtLeast(0) }
+        var k = 0
+        while (extra > 0) {
+            scaled[order[k % 3]]++
+            extra--
+            k++
+        }
+        for (i in 0 until 3) values[i] = scaled[i]
     }
 
     private fun cycleWidgetType(direction: Int = 1) {
         val size = widgetTypes.size
-        widgetTypeIndex = (widgetTypeIndex + direction % size + size) % size
-        focusedPoleIndex = 0 // reset focus
+        val nextIndex = (widgetTypeIndex + direction % size + size) % size
+        showWidget(widgetTypes[nextIndex], resetTopic = true, clearValues = false)
         markInteraction()
         hapticReminder.pulseDouble()
-        checkInSymbol = currentWidgetType.name
+        checkInSymbol = currentWidgetType.label
         mainHandler.removeCallbacks(clearCheckInRunnable)
         mainHandler.postDelayed(clearCheckInRunnable, CHECKIN_SHOW_MS)
-        Log.i(TAG, "Cycled widget type to: ${currentWidgetType.name}")
+        Log.i(TAG, "Cycled widget type to: ${currentWidgetType.label}")
     }
 
     private fun sendTap() {
@@ -461,71 +573,29 @@ class MainActivity : ComponentActivity() {
         flashCenter(Color.White)
         hapticReminder.hapticWristRoll()
 
-        val poleCount = currentWidgetType.poleCount
+        val type = currentWidgetType
+        val poleCount = type.poleCount
         val valuesStr = poleValues.take(poleCount).joinToString(",")
-        val topicId = currentWidgetType.topicHash
-
-        val payload = "RATE:$profileKey:$topicId:$valuesStr:${System.currentTimeMillis()}"
+        val payload = "RATE:$profileKey:$activeTopicId:$valuesStr:${System.currentTimeMillis()}"
         transmitTelemetry(payload, null)
 
-        // Use compressed payload for ultrasound fallback
-        val ultrasoundPayload = MetricChirp.encodeHighDensity(profileKey, topicId, poleValues, poleCount)
+        val ultrasoundPayload = MetricChirp.encodeHighDensity(
+            profileKey,
+            activeTopicId,
+            poleValues,
+            poleCount,
+            bipolar = type.bipolar
+        )
         gibberLinkEngine.sendChirp(ultrasoundPayload)
+
+        checkInSymbol = "\u2713 RATED"
+        mainHandler.removeCallbacks(clearCheckInRunnable)
+        mainHandler.postDelayed(clearCheckInRunnable, CHECKIN_SHOW_MS)
+        Log.i(TAG, "Wrist roll committed $payload / $ultrasoundPayload")
     }
 }
 
-private fun getPoleAt(pos: Offset, size: Size, widgetType: WidgetType, strokePx: Float): Int {
-    val center = Offset(size.width / 2f, size.height / 2f)
-    val maxRadius = min(size.width, size.height) / 2f
-    val dx = pos.x - center.x
-    val dy = pos.y - center.y
-    val dist = sqrt(dx * dx + dy * dy)
 
-    return when (widgetType) {
-        WidgetType.W1_MONO -> {
-            val r1Outer = maxRadius * 0.98f
-            val innerBoundary = r1Outer - strokePx * 1.5f
-            if (dist >= innerBoundary) 0 else -1
-        }
-        WidgetType.W2_SWITCHBOX -> {
-            val r1Outer = maxRadius * 0.98f
-            val innerBoundary = r1Outer - strokePx * 1.5f
-            if (dist >= innerBoundary) {
-                if (dy < 0) 0 else 1 // Top = 0, Bottom = 1
-            } else {
-                -1
-            }
-        }
-        WidgetType.W3_RINGS -> {
-            val r1Outer = maxRadius * 0.98f
-            val r1Center = r1Outer - strokePx / 2f
-            val r2Center = r1Center - strokePx
-            val r3Center = r2Center - strokePx
-            val innerCenterBoundary = r3Center - strokePx / 2f
-            when {
-                dist >= r1Center - strokePx / 2f -> 0
-                dist >= r2Center - strokePx / 2f -> 1
-                dist >= innerCenterBoundary -> 2
-                else -> -1
-            }
-        }
-        else -> {
-            if (dist < maxRadius * 0.3f) -1
-            else {
-                var angleDeg = atan2(dy, dx) * 180f / Math.PI.toFloat()
-                // Shift angle so that 0 is at the top (-90 degrees)
-                var shiftedAngle = (angleDeg + 90f) % 360f
-                if (shiftedAngle < 0) shiftedAngle += 360f
-                
-                val slice = 360f / widgetType.poleCount
-                var poleIndex = ((shiftedAngle + slice / 2f) / slice).toInt()
-                if (poleIndex >= widgetType.poleCount) poleIndex = 0
-                
-                poleIndex
-            }
-        }
-    }
-}
 
 @Composable
 fun GibberWearScreen(
@@ -542,9 +612,11 @@ fun GibberWearScreen(
     onSelectPole: (Int) -> Unit,
     onPoleTap: (Int, Int) -> Unit,
     onPoleDrag: (Int, Int) -> Unit,
-    onPoleRelease: (Int) -> Unit,
+    onSimplex: (IntArray) -> Unit,
+    onPoleRelease: () -> Unit,
     onCentreTap: () -> Unit,
     onDoubleTap: () -> Unit,
+    onToggleTriad: () -> Unit,
     onLongPress: () -> Unit,
     onRotary: (Int) -> Unit,
     onSwipeUp: () -> Unit,
@@ -570,10 +642,12 @@ fun GibberWearScreen(
     val formattedFocusedVal = if (focusedVal > 0) "+$focusedVal" else "$focusedVal"
 
     val strokePx = 44f
+    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .onSizeChanged { canvasSize = it }
             .background(Color.Black)
             .focusRequester(focusRequester)
             .focusable()
@@ -591,16 +665,28 @@ fun GibberWearScreen(
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val downTime = System.currentTimeMillis()
-                    val center = Offset(size.width / 2f, size.height / 2f)
-
-                    val dx = down.position.x - center.x
-                    val dy = down.position.y - center.y
-
-                    val touchedPoleIndex = getPoleAt(down.position, Size(size.width.toFloat(), size.height.toFloat()), activeWidget, strokePx)
+                    val canvas = Size(size.width.toFloat(), size.height.toFloat())
+                    val dx = down.position.x - canvas.width / 2f
+                    val dy = down.position.y - canvas.height / 2f
+                    val dist = sqrt(dx * dx + dy * dy)
+                    val hub = dist < min(canvas.width, canvas.height) / 2f * 0.16f
+                    val triad = activeWidget == WidgetType.W3_RINGS ||
+                            activeWidget == WidgetType.W3_SIMPLEX
+                    val simplexDown = if (activeWidget == WidgetType.W3_SIMPLEX && !hub) {
+                        WidgetGeometry.simplexWeights(down.position, canvas)
+                    } else {
+                        null
+                    }
+                    val touchedPoleIndex = when {
+                        simplexDown != null -> simplexDown.indices.maxBy { simplexDown[it] }
+                        activeWidget == WidgetType.W3_SIMPLEX -> -1
+                        else -> WidgetGeometry.poleAt(down.position, canvas, activeWidget, strokePx)
+                    }
 
                     var isDrag = false
                     var isLongPressFired = false
                     val longPressTimeout = viewConfiguration.longPressTimeoutMillis
+                    val editingPole = touchedPoleIndex != -1 || simplexDown != null
 
                     while (true) {
                         val event = withTimeoutOrNull(50L) { awaitPointerEvent() }
@@ -621,18 +707,27 @@ fun GibberWearScreen(
                             if (dragDistance > viewConfiguration.touchSlop) {
                                 isDrag = true
                             }
-                            if (isDrag && touchedPoleIndex != -1) {
+                            if (isDrag && activeWidget == WidgetType.W3_SIMPLEX && !hub) {
+                                val weights = WidgetGeometry.simplexWeights(change.position, canvas)
+                                if (weights != null) {
+                                    change.consume()
+                                    onSimplex(weights)
+                                }
+                            } else if (isDrag && touchedPoleIndex != -1) {
                                 change.consume()
                                 onSelectPole(touchedPoleIndex)
-                                val cDx = change.position.x - center.x
-                                val cDy = change.position.y - center.y
-                                val v = calculateValueFromAngle(cDx, cDy)
+                                val v = WidgetGeometry.valueAt(
+                                    change.position,
+                                    canvas,
+                                    activeWidget,
+                                    touchedPoleIndex
+                                )
                                 onPoleDrag(touchedPoleIndex, v)
                             }
                         } else {
-                            if (isDrag && touchedPoleIndex != -1) {
-                                onPoleRelease(touchedPoleIndex)
-                            } else if (isDrag && touchedPoleIndex == -1) {
+                            if (isDrag && editingPole) {
+                                onPoleRelease()
+                            } else if (isDrag) {
                                 val totalDx = change.position.x - down.position.x
                                 val totalDy = change.position.y - down.position.y
                                 if (abs(totalDy) > abs(totalDx)) {
@@ -643,20 +738,37 @@ fun GibberWearScreen(
                                     }
                                 }
                             } else if (!isLongPressFired) {
-                                if (touchedPoleIndex != -1) {
+                                if (simplexDown != null) {
+                                    onSimplex(simplexDown)
+                                } else if (touchedPoleIndex != -1) {
                                     onSelectPole(touchedPoleIndex)
-                                    val v = calculateValueFromAngle(dx, dy)
+                                    val v = WidgetGeometry.valueAt(
+                                        down.position,
+                                        canvas,
+                                        activeWidget,
+                                        touchedPoleIndex
+                                    )
                                     onPoleTap(touchedPoleIndex, v)
-                                } else {
-                                    // Disable center taps if we're on a rating/polygon widget
-                                    if (activeWidget == WidgetType.W1_MONO || activeWidget == WidgetType.W2_SWITCHBOX || activeWidget == WidgetType.W3_RINGS) {
-                                        if (now - lastTapTime < 300L) {
-                                            onDoubleTap()
-                                            lastTapTime = 0L
-                                        } else {
-                                            lastTapTime = now
-                                            onCentreTap()
-                                        }
+                                } else if (triad && hub) {
+                                    if (now - lastTapTime < 300L) {
+                                        onToggleTriad()
+                                        lastTapTime = 0L
+                                    } else {
+                                        lastTapTime = now
+                                        if (activeWidget == WidgetType.W3_RINGS) onCentreTap()
+                                    }
+                                } else if (
+                                    activeWidget == WidgetType.W1_MONO ||
+                                    activeWidget == WidgetType.W1X2 ||
+                                    activeWidget == WidgetType.W2_SWITCHBOX ||
+                                    activeWidget == WidgetType.W3_RINGS
+                                ) {
+                                    if (now - lastTapTime < 300L) {
+                                        onDoubleTap()
+                                        lastTapTime = 0L
+                                    } else {
+                                        lastTapTime = now
+                                        onCentreTap()
                                     }
                                 }
                             }
@@ -669,6 +781,7 @@ fun GibberWearScreen(
     ) {
         when (activeWidget) {
             WidgetType.W1_MONO -> W1MonoWidget(poleValues, focusedPoleIndex, strokePx)
+            WidgetType.W1X2 -> W1X2Widget(poleValues, focusedPoleIndex, isFocusAdjusting, strokePx)
             WidgetType.W2_SWITCHBOX -> W2SwitchboxWidget(poleValues, focusedPoleIndex, strokePx)
             WidgetType.W3_RINGS -> W3RingsWidget(poleValues, focusedPoleIndex, isFocusAdjusting, strokePx)
             WidgetType.W3_SIMPLEX -> W3SimplexWidget(poleValues, focusedPoleIndex)
@@ -679,15 +792,24 @@ fun GibberWearScreen(
             WidgetType.W8_OCTAD -> W8OctadWidget(poleValues, focusedPoleIndex)
         }
 
-        // Inner center flash feedback
         val density = LocalDensity.current
-        val maxRadius = min(384f, 384f) / 2f
-        val r1Outer = maxRadius * 0.98f
-        val r1Center = r1Outer - strokePx / 2f
-        val r2Center = r1Center - strokePx
-        val r3Center = r2Center - strokePx
-        val innerBoundaryPx = (r3Center - strokePx / 2f) * 2f
-        val innerCircleDp = with(density) { innerBoundaryPx.toDp() }
+        val maxRadius = min(canvasSize.width, canvasSize.height) / 2f
+        val innerDiameterPx = if (maxRadius <= 0f) {
+            0f
+        } else when (activeWidget) {
+            WidgetType.W1_MONO,
+            WidgetType.W1X2,
+            WidgetType.W3_RINGS -> {
+                val centers = WidgetGeometry.ringCenters(maxRadius, strokePx, activeWidget.poleCount)
+                (centers.last() - strokePx / 2f).coerceAtLeast(0f) * 2f
+            }
+            WidgetType.W2_SWITCHBOX -> {
+                val outer = maxRadius * 0.98f
+                (outer - strokePx).coerceAtLeast(0f) * 2f
+            }
+            else -> maxRadius
+        }
+        val innerCircleDp = with(density) { innerDiameterPx.toDp() }
 
         Box(
             modifier = Modifier
@@ -737,14 +859,4 @@ fun GibberWearScreen(
     }
 }
 
-private fun calculateValueFromAngle(dx: Float, dy: Float): Int {
-    var angleDeg = atan2(dy, dx) * 180f / PI.toFloat()
-    if (angleDeg < 0) angleDeg += 360f
-    val rel = (angleDeg - MainActivity.ARC_START + 360f) % 360f
-    return if (rel <= MainActivity.ARC_SWEEP) {
-        val frac = rel / MainActivity.ARC_SWEEP
-        (-100 + frac * 200f).toInt().coerceIn(-100, 100)
-    } else {
-        if (rel < 350f) 100 else -100
-    }
-}
+

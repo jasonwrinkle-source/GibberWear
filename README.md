@@ -67,9 +67,9 @@ gestures. See `WristGestureDetector.kt` for the tuning constants.
 
 | Gesture | Meaning | Chirp |
 |---------|---------|-------|
-| Shake (accelerometer) | "I'm okay / enjoying it" | `TAP` |
-| Wrist flip / rotate (gyroscope) | "more" or "less" | `DBL` |
-| Big sustained shake | "stop" | `HLD` |
+| Wrist flip (gyroscope) | Green — all good | `TAP` |
+| Shake (accelerometer) | Yellow — caution / mixed | `DBL` |
+| Vigorous sustained shake | Red — stop | `HLD` |
 
 A fully immobilised wrist cannot shake or flip at all, and needs a
 different channel (foot, voice, or the Dom's prompt) — out of scope.

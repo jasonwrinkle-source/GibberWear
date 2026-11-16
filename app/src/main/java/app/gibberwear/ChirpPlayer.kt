@@ -47,7 +47,10 @@ class ChirpPlayer(private val context: Context) {
      * See MetricChirp for the format.
      */
     fun playMetric(metric: Char, value: Int) {
-        play(MetricChirp.resId(metric, value))
+        val id = MetricChirp.resId(context, metric, value)
+        if (id != 0) {
+            play(id)
+        }
     }
 
     fun release() {
