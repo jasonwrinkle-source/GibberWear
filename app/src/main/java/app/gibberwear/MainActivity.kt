@@ -12,7 +12,6 @@ import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.annotation.RawRes
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -27,7 +26,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -39,18 +37,15 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import app.gibberwear.ui.*
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -76,10 +71,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private lateinit var prefs: SharedPreferences
-    private lateinit var gibberLinkEngine: GibberLinkEngine
     private lateinit var hapticReminder: HapticReminder
     private lateinit var gestureDetector: WristGestureDetector
     private lateinit var bleServer: BleServer
+    private lateinit var gibberLinkEngine: GibberLinkEngine
 
     private var localAudioPlayer: MediaPlayer? = null
 
@@ -92,42 +87,40 @@ class MainActivity : ComponentActivity() {
 
     private var isBleConnected = false
 
-    private val metrics = listOf(
-        MetricChirp.ENJOYMENT,
-        MetricChirp.HEAT,
-        MetricChirp.ENDURANCE
-    )
-    private var metricIndex by mutableStateOf(0)
+    private val widgetTypes = WidgetType.entries.toTypedArray()
+    private var widgetTypeIndex by mutableStateOf(widgetTypes.indexOf(WidgetType.W3_RINGS).coerceAtLeast(0))
+    private val currentWidgetType get() = widgetTypes[widgetTypeIndex]
 
-    private val metricValues = mutableStateMapOf(
-        MetricChirp.ENJOYMENT to 0,
-        MetricChirp.HEAT to 0,
-        MetricChirp.ENDURANCE to 0
-    )
+    // Generalized N-Pole State
+    private var poleValues by mutableStateOf(IntArray(8) { 0 })
+    private var focusedPoleIndex by mutableStateOf(0)
 
     private var centerFlash by mutableStateOf<Color?>(null)
     private var checkInSymbol by mutableStateOf<String?>(null)
     private var isInteracting by mutableStateOf(false)
     private var isFocusAdjusting by mutableStateOf(false)
-    
-    private val widgetTypes = listOf("R3", "W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8")
-    private var widgetTypeIndex by mutableStateOf(0)
-    private val currentWidgetType get() = widgetTypes[widgetTypeIndex]
+    private var isTransceiving by mutableStateOf(false)
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val clearCheckInRunnable = Runnable { checkInSymbol = null }
     private val hideInteractionRunnable = Runnable { isInteracting = false }
     private val restoreEqualBrightnessRunnable = Runnable { isFocusAdjusting = false }
+    private val hideTransceivingRunnable = Runnable { isTransceiving = false }
 
     private fun flashCenter(color: Color) {
         centerFlash = color
+    }
+
+    private fun markTransceiving() {
+        isTransceiving = true
+        mainHandler.removeCallbacks(hideTransceivingRunnable)
+        mainHandler.postDelayed(hideTransceivingRunnable, 2000L)
     }
 
     private fun markInteraction() {
         isInteracting = true
         mainHandler.removeCallbacks(hideInteractionRunnable)
         mainHandler.postDelayed(hideInteractionRunnable, INTERACTION_HIDE_MS)
-        markFocusAdjusting()
     }
 
     private fun markFocusAdjusting() {
@@ -137,15 +130,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun triggerCheckInPulse() {
+        flashCenter(Color(0xFFE91E63))
+        checkInSymbol = "✓ ♥"
         hapticReminder.pulseSingle()
-        checkInSymbol = "✓  ♥"
         mainHandler.removeCallbacks(clearCheckInRunnable)
         mainHandler.postDelayed(clearCheckInRunnable, CHECKIN_SHOW_MS)
     }
 
     private fun triggerCheckInTimer() {
+        flashCenter(Color(0xFF3498DB))
+        checkInSymbol = "✓ ⏱"
         hapticReminder.pulseDouble()
-        checkInSymbol = "✓  ⏱"
         mainHandler.removeCallbacks(clearCheckInRunnable)
         mainHandler.postDelayed(clearCheckInRunnable, CHECKIN_SHOW_MS)
     }
@@ -179,8 +174,8 @@ class MainActivity : ComponentActivity() {
 
         gestureDetector = WristGestureDetector(
             context = this,
-            onFlickUp = { cycleRatingType() },
-            onFlickDown = { sendTap() },
+            onFlickUp = { cycleRatingType(1) },
+            onFlickDown = { cycleRatingType(-1) },
             onShake = { sendDoubleTap() },
             onSustainedShake = { sendHold() },
             onWristRoll = { sendWristRoll() }
@@ -191,43 +186,40 @@ class MainActivity : ComponentActivity() {
                 GibberWearScreen(
                     profileKey = profileKey,
                     timerSec = timerSec,
-                    focusedMetricIndex = metricIndex,
-                    enjoymentVal = metricValues[MetricChirp.ENJOYMENT] ?: 0,
-                    heatVal = metricValues[MetricChirp.HEAT] ?: 0,
-                    enduranceVal = metricValues[MetricChirp.ENDURANCE] ?: 0,
+                    activeWidget = currentWidgetType,
+                    poleValues = poleValues,
+                    focusedPoleIndex = focusedPoleIndex,
                     centerFlash = centerFlash,
                     checkInSymbol = checkInSymbol,
                     isInteracting = isInteracting,
+                    isTransceiving = isTransceiving,
                     isFocusAdjusting = isFocusAdjusting,
-                    onSelectMetric = { idx ->
-                        metricIndex = idx
+                    onSelectPole = { idx ->
+                        focusedPoleIndex = idx
                         markFocusAdjusting()
                     },
-                    onRingTap = { metric, v ->
+                    onPoleTap = { idx, v ->
                         markInteraction()
-                        setMetricValue(metric, v, transmit = true)
+                        setPoleValue(idx, v, transmit = true)
                     },
-                    onRingDrag = { metric, v ->
+                    onPoleDrag = { idx, v ->
                         markInteraction()
-                        // Drag only smoothly updates local display - no chirp / BLE mid-drag
-                        setMetricValue(metric, v, transmit = false)
+                        setPoleValue(idx, v, transmit = false)
                     },
-                    onRingRelease = { metric ->
+                    onPoleRelease = { _ ->
                         markInteraction()
-                        // Final release transmits the settled value
-                        val finalVal = metricValues[metric] ?: 0
-                        transmitMetric(metric, finalVal)
+                        transmitAllPoles()
                     },
                     onCentreTap = { sendTap() },
                     onDoubleTap = { sendDoubleTap() },
                     onLongPress = { sendHold() },
                     onRotary = { delta ->
                         markInteraction()
-                        val currentMetric = metrics[metricIndex]
-                        val currentVal = metricValues[currentMetric] ?: 0
-                        setMetricValue(currentMetric, currentVal + delta, transmit = true)
+                        val currentVal = poleValues[focusedPoleIndex]
+                        setPoleValue(focusedPoleIndex, currentVal + delta, transmit = true)
                     },
-                    onSwipeUp = { cycleWidgetType() },
+                    onSwipeUp = { cycleWidgetType(1) },
+                    onSwipeDown = { cycleWidgetType(-1) },
                     onCheckInTimerTrigger = { triggerCheckInTimer() }
                 )
             }
@@ -237,6 +229,7 @@ class MainActivity : ComponentActivity() {
     private fun handleIncomingMessage(raw: String) {
         val msg = raw.trim()
         Log.i(TAG, "Incoming message: $msg")
+        markTransceiving()
 
         when {
             msg.startsWith("CFG:") -> {
@@ -277,26 +270,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            msg.startsWith("HEAT:") -> {
-                val parts = msg.split(":")
-                if (parts.size >= 3) {
-                    val targetKey = parts[1].trim()
-                    val heatVal = parts[2].trim().toIntOrNull()
-
-                    val isTarget = targetKey.equals("ALL", ignoreCase = true) ||
-                            targetKey.equals(profileKey, ignoreCase = true)
-
-                    if (isTarget && heatVal != null) {
-                        runOnUiThread {
-                            setMetricValue(MetricChirp.HEAT, heatVal, transmit = false)
-                            flashCenter(Color(0xFFFF9800)) // Amber / heat flash
-                            markInteraction()
-                            hapticReminder.pulseSingle()
-                        }
-                        Log.i(TAG, "Adopted heat: key=$targetKey, heat=$heatVal")
-                    }
-                }
-            }
             msg.startsWith("LPM:") -> {
                 val parts = msg.split(":")
                 if (parts.size >= 2) {
@@ -321,18 +294,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun transmitTelemetry(fullPayload: String, @RawRes fallbackAudioResId: Int? = null) {
+        markTransceiving()
         bleServer.sendNotification(fullPayload)
-        gibberLinkEngine.sendChirp(fullPayload)
+
+        // Prevent sending long payloads to GGWave which has a strict byte limit
+        if (!fullPayload.startsWith("RATE:")) {
+            gibberLinkEngine.sendChirp(fullPayload)
+        }
+
         if (fallbackAudioResId != null) {
             playLocalSound(fallbackAudioResId)
         }
-    }
-
-    private fun transmitMetric(metric: Char, value: Int) {
-        val clampedDisplay = value.coerceIn(-100, 100)
-        val metricMsg = MetricChirp.message(metric, clampedDisplay)
-        val fullPayload = "$profileKey:$metricMsg"
-        transmitTelemetry(fullPayload, MetricChirp.resId(metric, clampedDisplay))
     }
 
     private fun playLocalSound(@RawRes resId: Int) {
@@ -416,46 +388,55 @@ class MainActivity : ComponentActivity() {
     override fun onGenericMotionEvent(event: MotionEvent?): Boolean {
         if (event?.action == MotionEvent.ACTION_SCROLL) {
             val delta = event.getAxisValue(MotionEvent.AXIS_SCROLL)
-            val step = when {
-                delta < 0f -> 1
-                delta > 0f -> -1
-                else -> 0
-            }
-            if (step != 0) {
+            if (delta != 0f) {
+                val step = if (delta > 0) 5 else -5
                 markInteraction()
-                val currentMetric = metrics[metricIndex]
-                val currentVal = metricValues[currentMetric] ?: 0
-                setMetricValue(currentMetric, currentVal + step, transmit = true)
+                val currentVal = poleValues[focusedPoleIndex]
+                setPoleValue(focusedPoleIndex, currentVal + step, transmit = true)
                 return true
             }
         }
         return super.onGenericMotionEvent(event)
     }
 
-    private fun setMetricValue(metric: Char, displayVal: Int, transmit: Boolean = false) {
+    private fun setPoleValue(poleIndex: Int, displayVal: Int, transmit: Boolean = false) {
         val clampedDisplay = displayVal.coerceIn(-100, 100)
-        metricValues[metric] = clampedDisplay
+        val newValues = poleValues.copyOf()
+        newValues[poleIndex] = clampedDisplay
+        poleValues = newValues
 
         if (transmit) {
-            transmitMetric(metric, clampedDisplay)
+            transmitAllPoles()
         }
     }
 
-    private fun cycleRatingType() {
-        metricIndex = (metricIndex + 1) % metrics.size
-        markInteraction()
-        hapticReminder.pulseSingle()
-        Log.i(TAG, "Cycled rating type via flick up to: ${metrics[metricIndex]}")
+    private fun transmitAllPoles() {
+        val poleCount = currentWidgetType.poleCount
+        val valuesStr = poleValues.take(poleCount).joinToString(",")
+        val topicId = "debug-widget-cycle" // Placeholder for debug manual cycling
+
+        val payload = "RATE:$profileKey:$topicId:$valuesStr:${System.currentTimeMillis()}"
+        transmitTelemetry(payload, null)
     }
 
-    private fun cycleWidgetType() {
-        widgetTypeIndex = (widgetTypeIndex + 1) % widgetTypes.size
+    private fun cycleRatingType(direction: Int = 1) {
+        val count = currentWidgetType.poleCount
+        focusedPoleIndex = (focusedPoleIndex + direction % count + count) % count
+        markInteraction()
+        hapticReminder.pulseSingle()
+        Log.i(TAG, "Cycled rating focus via flick to index: $focusedPoleIndex")
+    }
+
+    private fun cycleWidgetType(direction: Int = 1) {
+        val size = widgetTypes.size
+        widgetTypeIndex = (widgetTypeIndex + direction % size + size) % size
+        focusedPoleIndex = 0 // reset focus
         markInteraction()
         hapticReminder.pulseDouble()
-        checkInSymbol = currentWidgetType
+        checkInSymbol = currentWidgetType.name
         mainHandler.removeCallbacks(clearCheckInRunnable)
         mainHandler.postDelayed(clearCheckInRunnable, CHECKIN_SHOW_MS)
-        Log.i(TAG, "Cycled widget type via swipe up to: $currentWidgetType")
+        Log.i(TAG, "Cycled widget type to: ${currentWidgetType.name}")
     }
 
     private fun sendTap() {
@@ -479,34 +460,70 @@ class MainActivity : ComponentActivity() {
     private fun sendWristRoll() {
         flashCenter(Color.White)
         hapticReminder.hapticWristRoll()
-        val e = metricValues[MetricChirp.ENJOYMENT] ?: 0
-        val h = metricValues[MetricChirp.HEAT] ?: 0
-        val n = metricValues[MetricChirp.ENDURANCE] ?: 0
-        val payload = "RATE:$profileKey:default:$e,$h,$n:${System.currentTimeMillis()}"
-        transmitTelemetry(payload, null) // no local chirp for now or fallback
+
+        val poleCount = currentWidgetType.poleCount
+        val valuesStr = poleValues.take(poleCount).joinToString(",")
+        val topicId = currentWidgetType.topicHash
+
+        val payload = "RATE:$profileKey:$topicId:$valuesStr:${System.currentTimeMillis()}"
+        transmitTelemetry(payload, null)
+
+        // Use compressed payload for ultrasound fallback
+        val ultrasoundPayload = MetricChirp.encodeHighDensity(profileKey, topicId, poleValues, poleCount)
+        gibberLinkEngine.sendChirp(ultrasoundPayload)
     }
 }
 
-private fun getRingColor(value: Int): Color {
-    val yellow = Color(0xFFF1C40F)
-    val green = Color(0xFF2ECC71)
-    val red = Color(0xFFE74C3C)
+private fun getPoleAt(pos: Offset, size: Size, widgetType: WidgetType, strokePx: Float): Int {
+    val center = Offset(size.width / 2f, size.height / 2f)
+    val maxRadius = min(size.width, size.height) / 2f
+    val dx = pos.x - center.x
+    val dy = pos.y - center.y
+    val dist = sqrt(dx * dx + dy * dy)
 
-    val t = (abs(value) / 100f).coerceIn(0f, 1f)
-    return if (value >= 0) {
-        Color(
-            red = yellow.red + t * (green.red - yellow.red),
-            green = yellow.green + t * (green.green - yellow.green),
-            blue = yellow.blue + t * (green.blue - yellow.blue),
-            alpha = 1.0f
-        )
-    } else {
-        Color(
-            red = yellow.red + t * (red.red - yellow.red),
-            green = yellow.green + t * (red.green - yellow.green),
-            blue = yellow.blue + t * (red.blue - yellow.blue),
-            alpha = 1.0f
-        )
+    return when (widgetType) {
+        WidgetType.W1_MONO -> {
+            val r1Outer = maxRadius * 0.98f
+            val innerBoundary = r1Outer - strokePx * 1.5f
+            if (dist >= innerBoundary) 0 else -1
+        }
+        WidgetType.W2_SWITCHBOX -> {
+            val r1Outer = maxRadius * 0.98f
+            val innerBoundary = r1Outer - strokePx * 1.5f
+            if (dist >= innerBoundary) {
+                if (dy < 0) 0 else 1 // Top = 0, Bottom = 1
+            } else {
+                -1
+            }
+        }
+        WidgetType.W3_RINGS -> {
+            val r1Outer = maxRadius * 0.98f
+            val r1Center = r1Outer - strokePx / 2f
+            val r2Center = r1Center - strokePx
+            val r3Center = r2Center - strokePx
+            val innerCenterBoundary = r3Center - strokePx / 2f
+            when {
+                dist >= r1Center - strokePx / 2f -> 0
+                dist >= r2Center - strokePx / 2f -> 1
+                dist >= innerCenterBoundary -> 2
+                else -> -1
+            }
+        }
+        else -> {
+            if (dist < maxRadius * 0.3f) -1
+            else {
+                var angleDeg = atan2(dy, dx) * 180f / Math.PI.toFloat()
+                // Shift angle so that 0 is at the top (-90 degrees)
+                var shiftedAngle = (angleDeg + 90f) % 360f
+                if (shiftedAngle < 0) shiftedAngle += 360f
+                
+                val slice = 360f / widgetType.poleCount
+                var poleIndex = ((shiftedAngle + slice / 2f) / slice).toInt()
+                if (poleIndex >= widgetType.poleCount) poleIndex = 0
+                
+                poleIndex
+            }
+        }
     }
 }
 
@@ -514,23 +531,24 @@ private fun getRingColor(value: Int): Color {
 fun GibberWearScreen(
     profileKey: String,
     timerSec: Int,
-    focusedMetricIndex: Int,
-    enjoymentVal: Int,
-    heatVal: Int,
-    enduranceVal: Int,
+    activeWidget: WidgetType,
+    poleValues: IntArray,
+    focusedPoleIndex: Int,
     centerFlash: Color?,
     checkInSymbol: String?,
     isInteracting: Boolean,
+    isTransceiving: Boolean,
     isFocusAdjusting: Boolean,
-    onSelectMetric: (Int) -> Unit,
-    onRingTap: (Char, Int) -> Unit,
-    onRingDrag: (Char, Int) -> Unit,
-    onRingRelease: (Char) -> Unit,
+    onSelectPole: (Int) -> Unit,
+    onPoleTap: (Int, Int) -> Unit,
+    onPoleDrag: (Int, Int) -> Unit,
+    onPoleRelease: (Int) -> Unit,
     onCentreTap: () -> Unit,
     onDoubleTap: () -> Unit,
     onLongPress: () -> Unit,
     onRotary: (Int) -> Unit,
     onSwipeUp: () -> Unit,
+    onSwipeDown: () -> Unit,
     onCheckInTimerTrigger: () -> Unit
 ) {
     LaunchedEffect(timerSec) {
@@ -548,14 +566,7 @@ fun GibberWearScreen(
         focusRequester.requestFocus()
     }
 
-    val metrics = listOf(
-        Triple(MetricChirp.ENJOYMENT, enjoymentVal, getRingColor(enjoymentVal)),
-        Triple(MetricChirp.HEAT, heatVal, getRingColor(heatVal)),
-        Triple(MetricChirp.ENDURANCE, enduranceVal, getRingColor(enduranceVal))
-    )
-
-    val focusedTriple = metrics[focusedMetricIndex.coerceIn(0, 2)]
-    val focusedVal = focusedTriple.second
+    val focusedVal = poleValues.getOrElse(focusedPoleIndex) { 0 }
     val formattedFocusedVal = if (focusedVal > 0) "+$focusedVal" else "$focusedVal"
 
     val strokePx = 44f
@@ -575,30 +586,17 @@ fun GibberWearScreen(
                 if (step != 0) onRotary(step)
                 true
             }
-            .pointerInput(Unit) {
+            .pointerInput(activeWidget) {
                 var lastTapTime = 0L
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val downTime = System.currentTimeMillis()
                     val center = Offset(size.width / 2f, size.height / 2f)
-                    val maxRadius = min(size.width, size.height) / 2f
-
-                    val r1Outer = maxRadius * 0.98f
-                    val r1Center = r1Outer - strokePx / 2f
-                    val r2Center = r1Center - strokePx
-                    val r3Center = r2Center - strokePx
-                    val innerCenterBoundary = r3Center - strokePx / 2f
 
                     val dx = down.position.x - center.x
                     val dy = down.position.y - center.y
-                    val dist = sqrt(dx * dx + dy * dy)
 
-                    val touchedMetricIndex = when {
-                        dist >= r1Center - strokePx / 2f -> 0
-                        dist >= r2Center - strokePx / 2f -> 1
-                        dist >= innerCenterBoundary -> 2
-                        else -> -1
-                    }
+                    val touchedPoleIndex = getPoleAt(down.position, Size(size.width.toFloat(), size.height.toFloat()), activeWidget, strokePx)
 
                     var isDrag = false
                     var isLongPressFired = false
@@ -623,36 +621,42 @@ fun GibberWearScreen(
                             if (dragDistance > viewConfiguration.touchSlop) {
                                 isDrag = true
                             }
-                            if (isDrag && touchedMetricIndex != -1) {
+                            if (isDrag && touchedPoleIndex != -1) {
                                 change.consume()
-                                onSelectMetric(touchedMetricIndex)
+                                onSelectPole(touchedPoleIndex)
                                 val cDx = change.position.x - center.x
                                 val cDy = change.position.y - center.y
                                 val v = calculateValueFromAngle(cDx, cDy)
-                                onRingDrag(metrics[touchedMetricIndex].first, v)
+                                onPoleDrag(touchedPoleIndex, v)
                             }
                         } else {
-                            if (isDrag && touchedMetricIndex != -1) {
-                                // Finger released after dragging: transmit final settled value!
-                                onRingRelease(metrics[touchedMetricIndex].first)
-                            } else if (isDrag && touchedMetricIndex == -1) {
+                            if (isDrag && touchedPoleIndex != -1) {
+                                onPoleRelease(touchedPoleIndex)
+                            } else if (isDrag && touchedPoleIndex == -1) {
                                 val totalDx = change.position.x - down.position.x
                                 val totalDy = change.position.y - down.position.y
-                                if (abs(totalDy) > abs(totalDx) && totalDy < -viewConfiguration.touchSlop) {
-                                    onSwipeUp()
+                                if (abs(totalDy) > abs(totalDx)) {
+                                    if (totalDy < -viewConfiguration.touchSlop) {
+                                        onSwipeUp()
+                                    } else if (totalDy > viewConfiguration.touchSlop) {
+                                        onSwipeDown()
+                                    }
                                 }
                             } else if (!isLongPressFired) {
-                                if (touchedMetricIndex != -1) {
-                                    onSelectMetric(touchedMetricIndex)
+                                if (touchedPoleIndex != -1) {
+                                    onSelectPole(touchedPoleIndex)
                                     val v = calculateValueFromAngle(dx, dy)
-                                    onRingTap(metrics[touchedMetricIndex].first, v)
+                                    onPoleTap(touchedPoleIndex, v)
                                 } else {
-                                    if (now - lastTapTime < 300L) {
-                                        onDoubleTap()
-                                        lastTapTime = 0L
-                                    } else {
-                                        lastTapTime = now
-                                        onCentreTap()
+                                    // Disable center taps if we're on a rating/polygon widget
+                                    if (activeWidget == WidgetType.W1_MONO || activeWidget == WidgetType.W2_SWITCHBOX || activeWidget == WidgetType.W3_RINGS) {
+                                        if (now - lastTapTime < 300L) {
+                                            onDoubleTap()
+                                            lastTapTime = 0L
+                                        } else {
+                                            lastTapTime = now
+                                            onCentreTap()
+                                        }
                                     }
                                 }
                             }
@@ -663,89 +667,16 @@ fun GibberWearScreen(
             },
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val maxRadius = min(size.width, size.height) / 2f
-
-            val r1Outer = maxRadius * 0.98f
-            val r1Center = r1Outer - strokePx / 2f
-            val r2Center = r1Center - strokePx
-            val r3Center = r2Center - strokePx
-            val ringCenterRadii = listOf(r1Center, r2Center, r3Center)
-
-            metrics.forEachIndexed { index, (metricChar, valInt, color) ->
-                val isFocused = (index == focusedMetricIndex)
-                val centerRadius = ringCenterRadii[index]
-                val diameter = centerRadius * 2f
-                val left = (size.width - diameter) / 2f
-                val top = (size.height - diameter) / 2f
-                val stroke = Stroke(width = strokePx, cap = StrokeCap.Round)
-
-                val alpha = if (isFocusAdjusting) {
-                    if (isFocused) 1.0f else 0.25f
-                } else {
-                    1.0f
-                }
-
-                // 1. Track arc
-                drawArc(
-                    color = Color(0xFF222222).copy(alpha = alpha),
-                    startAngle = MainActivity.ARC_START,
-                    sweepAngle = MainActivity.ARC_SWEEP,
-                    useCenter = false,
-                    topLeft = Offset(left, top),
-                    size = Size(diameter, diameter),
-                    style = stroke
-                )
-
-                // 2. Value arc
-                if (valInt != 0) {
-                    val sweepFromNoon = 170f * (valInt / 100f)
-                    drawArc(
-                        color = color.copy(alpha = alpha),
-                        startAngle = 270f,
-                        sweepAngle = sweepFromNoon,
-                        useCenter = false,
-                        topLeft = Offset(left, top),
-                        size = Size(diameter, diameter),
-                        style = stroke
-                    )
-                }
-
-                // 3. Name centered at 12:00 within stroke
-                val name = MetricChirp.name(metricChar).uppercase()
-                val nativeCanvas = drawContext.canvas.nativeCanvas
-                val centerX = size.width / 2f
-                val centerY = size.height / 2f
-
-                val textPaint = android.graphics.Paint().apply {
-                    this.color = if (isFocusAdjusting && !isFocused) android.graphics.Color.GRAY else android.graphics.Color.WHITE
-                    this.textSize = if (isFocused) 10.dp.toPx() else 8.5.dp.toPx()
-                    this.isAntiAlias = true
-                    this.textAlign = android.graphics.Paint.Align.CENTER
-                    this.isFakeBoldText = isFocused
-                }
-
-                val numChars = name.length
-                val charWidths = FloatArray(numChars)
-                textPaint.getTextWidths(name, charWidths)
-                val totalWidth = charWidths.sum()
-                val totalAngleDeg = (totalWidth / centerRadius) * (180f / PI.toFloat())
-                var currentAngleDeg = 270f - (totalAngleDeg / 2f)
-
-                for (i in 0 until numChars) {
-                    val charW = charWidths[i]
-                    val charAngleDeg = (charW / centerRadius) * (180f / PI.toFloat())
-                    val midCharAngleDeg = currentAngleDeg + (charAngleDeg / 2f)
-
-                    nativeCanvas.save()
-                    nativeCanvas.rotate(midCharAngleDeg + 90f, centerX, centerY)
-                    val yPos = centerY - centerRadius + (textPaint.textSize / 3.2f)
-                    nativeCanvas.drawText(name[i].toString(), centerX, yPos, textPaint)
-                    nativeCanvas.restore()
-
-                    currentAngleDeg += charAngleDeg
-                }
-            }
+        when (activeWidget) {
+            WidgetType.W1_MONO -> W1MonoWidget(poleValues, focusedPoleIndex, strokePx)
+            WidgetType.W2_SWITCHBOX -> W2SwitchboxWidget(poleValues, focusedPoleIndex, strokePx)
+            WidgetType.W3_RINGS -> W3RingsWidget(poleValues, focusedPoleIndex, isFocusAdjusting, strokePx)
+            WidgetType.W3_SIMPLEX -> W3SimplexWidget(poleValues, focusedPoleIndex)
+            WidgetType.W4_TETRAD -> W4TetradWidget(poleValues, focusedPoleIndex)
+            WidgetType.W5_PENTAD -> W5PentadWidget(poleValues, focusedPoleIndex)
+            WidgetType.W6_HEXAD -> W6HexadWidget(poleValues, focusedPoleIndex)
+            WidgetType.W7_HEPTAD -> W7HeptadWidget(poleValues, focusedPoleIndex)
+            WidgetType.W8_OCTAD -> W8OctadWidget(poleValues, focusedPoleIndex)
         }
 
         // Inner center flash feedback
@@ -765,10 +696,8 @@ fun GibberWearScreen(
                 .background(centerFlash ?: Color.Transparent),
             contentAlignment = Alignment.Center
         ) {
-            // Holds flash background
         }
 
-        // Foreground text: drawn on top and allowed to expand across/over inner rings
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
@@ -793,8 +722,7 @@ fun GibberWearScreen(
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center
                     )
-                } else {
-                    // Profile key only - bold and layered on top of rings
+                } else if (isTransceiving) {
                     Text(
                         text = profileKey.uppercase(),
                         color = Color.White,
@@ -818,34 +746,5 @@ private fun calculateValueFromAngle(dx: Float, dy: Float): Int {
         (-100 + frac * 200f).toInt().coerceIn(-100, 100)
     } else {
         if (rel < 350f) 100 else -100
-    }
-}
-
-@Preview(device = "id:wearos_small_round", showBackground = true, backgroundColor = 0xFF000000)
-@Composable
-fun GibberWearPreviewOverview() {
-    MaterialTheme {
-        GibberWearScreen(
-            profileKey = "adam",
-            timerSec = 0,
-            focusedMetricIndex = 0,
-            enjoymentVal = 70,
-            heatVal = 50,
-            enduranceVal = 30,
-            centerFlash = null,
-            checkInSymbol = null,
-            isInteracting = false,
-            isFocusAdjusting = false,
-            onSelectMetric = {},
-            onRingTap = { _, _ -> },
-            onRingDrag = { _, _ -> },
-            onRingRelease = {},
-            onCentreTap = {},
-            onDoubleTap = {},
-            onLongPress = {},
-            onRotary = {},
-            onSwipeUp = {},
-            onCheckInTimerTrigger = {}
-        )
     }
 }

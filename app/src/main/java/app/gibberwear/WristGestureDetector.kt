@@ -8,15 +8,6 @@ import android.hardware.SensorManager
 import kotlin.math.abs
 import kotlin.math.sqrt
 
-/**
- * Wrist gestures (GibberWear v2).
- *
- * Natural progression mapping:
- *   1. Casual wrist flip (gyroscope)     -> Green / Check-in acknowledge -> TAP
- *   2. Single shake (accelerometer)      -> Yellow / Secondary signal     -> DBL
- *   3. Sustained shake (accelerometer)   -> Red / Emergency stop          -> HLD
- *   4. Wrist Roll (gyroscope)            -> Commit Draft                 -> WRIST_ROLL
- */
 class WristGestureDetector(
     context: Context,
     private val onFlickUp: () -> Unit,
@@ -27,33 +18,11 @@ class WristGestureDetector(
 ) : SensorEventListener {
 
     companion object {
-        /**
-         * Angular velocity (rad/s) around forearm axis for a casual flip.
-         * Tuned to 3.8f: intentional rotation to trigger green without firing on slow arm movement.
-         */
         const val FLIP_THRESHOLD = 3.8f
-
-        /**
-         * Acceleration above gravity (m/s^2) for a single shake (Yellow / DBL).
-         */
         const val SHAKE_THRESHOLD = 26f
-
-        /**
-         * Acceleration above gravity (m/s^2) threshold for sustained shake peaks (Red / HLD).
-         */
         const val STOP_PEAK_THRESHOLD = 22f
-
-        /**
-         * Duration (ms) that repeated stop-shake peaks must occur within to trigger "stop".
-         */
         const val SUSTAINED_WINDOW_MS = 600L
-
-        /**
-         * Minimum number of vigorous peaks within the window required to trigger "stop".
-         */
         const val SUSTAINED_MIN_PEAKS = 3
-
-        /** Ignore further gestures within this window after one fires. */
         const val DEBOUNCE_MS = 1500L
 
         // Wrist Roll Kinematic Parameters
@@ -72,7 +41,6 @@ class WristGestureDetector(
 
     private var lastGestureMs = 0L
 
-    // For sustained shake detection: track timestamps of recent strong peaks
     private val recentStopPeaks = mutableListOf<Long>()
     private var lastPeakTime = 0L
 
@@ -82,6 +50,7 @@ class WristGestureDetector(
     private var rollPeakVelocity = 0f
     private var lastGyroTime = 0L
     private var isRolling = false
+    private val initTime = System.currentTimeMillis()
 
     fun start() {
         accelerometer?.let {
@@ -110,17 +79,14 @@ class WristGestureDetector(
         val x = event.values[0]
         val y = event.values[1]
         val z = event.values[2]
-        // Acceleration magnitude above gravity (1 g removed), in m/s^2.
         val mag = sqrt(x * x + y * y + z * z) - SensorManager.GRAVITY_EARTH
 
         if (mag > STOP_PEAK_THRESHOLD) {
-            // Count discrete oscillation peaks (separated by at least 60ms)
             if (now - lastPeakTime > 60L) {
                 lastPeakTime = now
                 recentStopPeaks.add(now)
             }
 
-            // Purge peaks older than the window
             recentStopPeaks.removeAll { now - it > SUSTAINED_WINDOW_MS }
 
             if (recentStopPeaks.size >= SUSTAINED_MIN_PEAKS) {
@@ -135,7 +101,6 @@ class WristGestureDetector(
             recentStopPeaks.removeAll { now - it > SUSTAINED_WINDOW_MS }
         }
 
-        // Single deliberate shake -> Yellow (DBL)
         if (mag > SHAKE_THRESHOLD) {
             if (now - lastGestureMs >= DEBOUNCE_MS) {
                 lastGestureMs = now
@@ -147,9 +112,20 @@ class WristGestureDetector(
     private fun handleGyro(event: SensorEvent) {
         val now = System.currentTimeMillis()
         
-        // --- Legacy Wrist Flip Detection (X-axis) ---
+        // Block gestures entirely for 2.5 seconds after launch to prevent 
+        // startup spikes from triggering an infinite pulse-crash loop.
+        if (now - initTime < 2500L) {
+            return
+        }
+
         val wx = event.values[0]
-        if (abs(wx) > FLIP_THRESHOLD) {
+        val wy = event.values[1]
+
+        // Disambiguate: if one axis dominates strongly, suppress the other.
+        val isFlicking = abs(wx) > FLIP_THRESHOLD
+
+        // --- Legacy Wrist Flip Detection (X-axis) ---
+        if (isFlicking && !isRolling) { // If we're already mid-roll, ignore stray X-axis spikes
             if (now - lastGestureMs >= DEBOUNCE_MS) {
                 lastGestureMs = now
                 if (wx > 0) {
@@ -158,26 +134,30 @@ class WristGestureDetector(
                     onFlickDown()
                 }
             }
+            // Reset any partial roll if a flick happened
+            isRolling = false
+            rollIntegratedAngle = 0f
+            rollPeakVelocity = 0f
+            lastGyroTime = event.timestamp
+            return
         }
 
         // --- N-Pole Wrist Roll Detection (Y-axis) ---
-        val wy = event.values[1]
         if (lastGyroTime == 0L) {
             lastGyroTime = event.timestamp
             return
         }
 
-        val dt = (event.timestamp - lastGyroTime) * 1.0e-9f // convert nanoseconds to seconds
+        val dt = (event.timestamp - lastGyroTime) * 1.0e-9f
         lastGyroTime = event.timestamp
 
-        // Reset if we exceed the time window
         if (isRolling && (now - rollStartTime > MAX_GESTURE_WINDOW_MS)) {
             isRolling = false
             rollIntegratedAngle = 0f
             rollPeakVelocity = 0f
         }
 
-        if (abs(wy) > 1.8f) { // Above "normal movement" threshold
+        if (abs(wy) > 1.8f && !isFlicking) { // Above "normal movement" threshold, and not currently flicking
             if (!isRolling) {
                 isRolling = true
                 rollStartTime = now
@@ -206,4 +186,3 @@ class WristGestureDetector(
         // Not used.
     }
 }
-
