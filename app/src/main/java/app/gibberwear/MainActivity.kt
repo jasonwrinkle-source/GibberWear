@@ -59,7 +59,11 @@ class MainActivity : ComponentActivity() {
         const val PREF_PROFILE_KEY = "profile_key"
         const val PREF_TIMER_SEC = "timer_sec"
         const val PREF_LPM = "low_power_mode"
+        const val PREF_HEAT = "heat_value"
         const val DEFAULT_PROFILE_KEY = "adam"
+
+        /** Heat ring on W1x2 and W1x3. Outer ring is enjoyment. */
+        const val HEAT_POLE = 1
 
         const val CHECKIN_SHOW_MS = 3000L
         const val PLACEHOLDER_TOPIC = "debug-widget-cycle"
@@ -71,6 +75,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var hapticReminder: HapticReminder
     private lateinit var gestureDetector: WristGestureDetector
     private lateinit var bleServer: BleServer
+    private lateinit var gestureSpeaker: GestureSpeaker
     private lateinit var gibberLinkEngine: GibberLinkEngine
 
     private var localAudioPlayer: MediaPlayer? = null
@@ -153,6 +158,12 @@ class MainActivity : ComponentActivity() {
             .ifEmpty { DEFAULT_PROFILE_KEY }
         timerSec = prefs.getInt(PREF_TIMER_SEC, 0)
         isLowPowerMode = prefs.getBoolean(PREF_LPM, false)
+        val savedHeat = prefs.getInt(PREF_HEAT, 0).coerceIn(-100, 100)
+        if (savedHeat != 0) {
+            val next = poleValues.copyOf()
+            next[HEAT_POLE] = savedHeat
+            poleValues = next
+        }
 
         hapticReminder = HapticReminder(this)
 
@@ -172,13 +183,17 @@ class MainActivity : ComponentActivity() {
             }
         )
 
+        gestureSpeaker = GestureSpeaker(this)
+        gestureSpeaker.start()
+
         gestureDetector = WristGestureDetector(
             context = this,
-            onFlickUp = { sendTap() },
-            onFlickDown = { sendTap() },
-            onShake = { sendDoubleTap() },
-            onSustainedShake = { sendHold() },
-            onWristRoll = { sendWristRoll() }
+            onFlickUp = { sendTap("Flick. Go.") },
+            onFlickDown = { sendTap("Flick. Go.") },
+            onElbowRaise = { sendWristRoll("Elbow raise. Rating.") },
+            onShake = { sendDoubleTap("Shake. Caution.") },
+            onSustainedShake = { sendHold("Hard shake. Stop.") },
+            onWristRoll = { sendWristRoll("Twist. Rating.") }
         )
 
         setContent {
@@ -212,10 +227,10 @@ class MainActivity : ComponentActivity() {
                         focusedPoleIndex = weights.indices.maxBy { weights[it] }
                     },
                     onPoleRelease = { markInteraction() },
-                    onCentreTap = { sendTap() },
-                    onDoubleTap = { sendDoubleTap() },
+                    onCentreTap = { sendTap("Tap. Go.") },
+                    onDoubleTap = { sendDoubleTap("Double tap. Caution.") },
                     onToggleTriad = { toggleTriadLayout() },
-                    onLongPress = { sendHold() },
+                    onLongPress = { sendHold("Hold. Stop.") },
                     onRotary = { delta ->
                         markInteraction()
                         markFocusAdjusting()
@@ -232,6 +247,14 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    /** Profile key or ALL. A blank address is the deprecated unkeyed form and does not match. */
+    private fun isAddressed(target: String): Boolean {
+        val address = target.trim()
+        if (address.isEmpty()) return false
+        return address.equals("ALL", ignoreCase = true) ||
+                address.equals(profileKey, ignoreCase = true)
     }
 
     private fun handleIncomingMessage(raw: String) {
@@ -256,17 +279,24 @@ class MainActivity : ComponentActivity() {
                     } else {
                         parts[2].trim().toIntOrNull() ?: 0
                     }
-                    if (newKey.isNotEmpty()) {
-                        profileKey = newKey
-                        timerSec = newTimerSec
-                        prefs.edit()
-                            .putString(PREF_PROFILE_KEY, newKey)
-                            .putInt(PREF_TIMER_SEC, newTimerSec)
-                            .apply()
-                        Log.i(TAG, "Configured profile: key=$newKey, timerSec=$newTimerSec")
-
-                        val ackMsg = "ACK:$newKey:CFG"
-                        transmitTelemetry(ackMsg)
+                    when {
+                        newKey.isEmpty() -> Log.i(TAG, "Ignoring CFG with no key")
+                        newKey.equals("ALL", ignoreCase = true) -> {
+                            timerSec = newTimerSec
+                            prefs.edit().putInt(PREF_TIMER_SEC, newTimerSec).apply()
+                            Log.i(TAG, "Configured timer for ALL: timerSec=$newTimerSec key=$profileKey")
+                            transmitTelemetry("ACK:$profileKey:CFG")
+                        }
+                        else -> {
+                            profileKey = newKey
+                            timerSec = newTimerSec
+                            prefs.edit()
+                                .putString(PREF_PROFILE_KEY, newKey)
+                                .putInt(PREF_TIMER_SEC, newTimerSec)
+                                .apply()
+                            Log.i(TAG, "Configured profile: key=$newKey, timerSec=$newTimerSec")
+                            transmitTelemetry("ACK:$newKey:CFG")
+                        }
                     }
                 }
             }
@@ -278,9 +308,7 @@ class MainActivity : ComponentActivity() {
                     val target = parts[1].trim()
                     val topic = parts[2].trim()
                     val widget = WidgetType.fromCode(parts[3].trim())
-                    val isTarget = target.equals("ALL", ignoreCase = true) ||
-                            target.equals(profileKey, ignoreCase = true)
-                    if (isTarget && topic.isNotEmpty() && widget != null) {
+                    if (isAddressed(target) && topic.isNotEmpty() && widget != null) {
                         activeTopicId = topic
                         showWidget(widget, resetTopic = false, clearValues = true)
                         hapticReminder.pulseDouble()
@@ -298,10 +326,7 @@ class MainActivity : ComponentActivity() {
                     val targetKey = parts[1].trim()
                     val type = parts[2].trim()
 
-                    val isTarget = targetKey.equals("ALL", ignoreCase = true) ||
-                            targetKey.equals(profileKey, ignoreCase = true)
-
-                    if (isTarget) {
+                    if (isAddressed(targetKey)) {
                         when (type.uppercase()) {
                             "P" -> triggerCheckInPulse()
                             "T" -> triggerCheckInTimer()
@@ -310,14 +335,31 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            msg.startsWith("LPM:") -> {
+            msg.startsWith("HEAT:") -> {
+                // Heat-popover sync, sent after ACK:<key>:CFG. HEAT:<key>:<value>, -100..100.
                 val parts = msg.split(":")
-                if (parts.size >= 2) {
-                    val lpmVal = parts[1].trim()
-                    isLowPowerMode = (lpmVal == "1" || lpmVal.uppercase() == "ON")
+                if (parts.size >= 3) {
+                    val target = parts[1].trim()
+                    val heat = parts[2].trim().toIntOrNull()
+                    if (heat != null && isAddressed(target)) {
+                        applySyncedHeat(heat)
+                    } else {
+                        Log.i(TAG, "Ignoring HEAT target=$target value=${parts[2].trim()}")
+                    }
+                }
+            }
+
+            msg.startsWith("LPM:") -> {
+                // LPM:<KEY|ALL>:<STATE>. Unkeyed LPM:1 is ignored.
+                val parts = msg.split(":")
+                if (parts.size >= 3 && isAddressed(parts[1])) {
+                    val lpmVal = parts[2].trim()
+                    isLowPowerMode = (lpmVal == "1" || lpmVal.equals("ON", ignoreCase = true))
                     prefs.edit().putBoolean(PREF_LPM, isLowPowerMode).apply()
                     Log.i(TAG, "Low Power Mode set to: $isLowPowerMode")
                     updateGibberLinkState()
+                } else {
+                    Log.i(TAG, "Ignoring LPM without a key or ALL")
                 }
             }
         }
@@ -379,6 +421,7 @@ class MainActivity : ComponentActivity() {
         mainHandler.removeCallbacks(hideTransceivingRunnable)
         bleServer.stop()
         gibberLinkEngine.release()
+        gestureSpeaker.stop()
         localAudioPlayer?.release()
         super.onDestroy()
     }
@@ -445,6 +488,28 @@ class MainActivity : ComponentActivity() {
         return super.onGenericMotionEvent(event)
     }
 
+    /**
+     * Copy the profile heat onto the heat ring. Sent by Muse as HEAT:<key>:<value>
+     * about 1.5s after the watch ACKs CFG. Not a rating commit, so nothing is transmitted.
+     */
+    private fun applySyncedHeat(raw: Int) {
+        val heat = raw.coerceIn(-100, 100)
+        val showsHeat = currentWidgetType == WidgetType.W1X2 ||
+                currentWidgetType == WidgetType.W3_RINGS
+        if (!showsHeat) {
+            showWidget(WidgetType.W3_RINGS, resetTopic = false, clearValues = false)
+        }
+        focusedPoleIndex = HEAT_POLE
+        setPoleValue(HEAT_POLE, heat)
+        prefs.edit().putInt(PREF_HEAT, heat).apply()
+        checkInSymbol = null
+        mainHandler.removeCallbacks(clearCheckInRunnable)
+        markFocusAdjusting()
+        markInteraction()
+        hapticReminder.pulseSingle()
+        Log.i(TAG, "Synced heat rater to $heat")
+    }
+
     private fun setPoleValue(poleIndex: Int, displayVal: Int, renormalizeSimplex: Boolean = false) {
         val type = currentWidgetType
         if (poleIndex !in 0 until type.poleCount) return
@@ -477,6 +542,13 @@ class MainActivity : ComponentActivity() {
         }
         if (type == WidgetType.W3_SIMPLEX && !clearValues) {
             scaleSimplexTo100(next)
+        }
+        // A radar vertex at 0 sits on the hub, so an all-zero face has no area.
+        // 50 is the midpoint web and shows a regular polygon immediately.
+        if (type.poleCount >= 4 && type.minValue >= 0) {
+            if ((0 until type.poleCount).all { next[it] == 0 }) {
+                for (i in 0 until type.poleCount) next[i] = 50
+            }
         }
         poleValues = next
     }
@@ -551,26 +623,32 @@ class MainActivity : ComponentActivity() {
         Log.i(TAG, "Cycled widget type to: ${currentWidgetType.label}")
     }
 
-    private fun sendTap() {
+    private fun sendTap(spoken: String) {
+        gestureSpeaker.say(spoken)
         flashCenter(Color(0xFF2ECC71))
         hapticReminder.hapticGreen()
         transmitTelemetry("$profileKey:TAP", R.raw.chirp_tap)
     }
 
-    private fun sendDoubleTap() {
+    private fun sendDoubleTap(spoken: String) {
+        gestureSpeaker.say(spoken)
         flashCenter(Color(0xFFF1C40F))
         hapticReminder.hapticYellow()
         transmitTelemetry("$profileKey:DBL", R.raw.chirp_doubletap)
     }
 
-    private fun sendHold() {
+    private fun sendHold(spoken: String) {
+        gestureSpeaker.say(spoken)
         flashCenter(Color(0xFFE74C3C))
         hapticReminder.hapticRed()
         transmitTelemetry("$profileKey:HLD", R.raw.chirp_hold)
     }
 
-    private fun sendWristRoll() {
-        flashCenter(Color.White)
+    private fun sendWristRoll(spoken: String) {
+        gestureSpeaker.say(spoken)
+        // Leave the ring center well clear. A white disk there washes out "RATED"
+        // and covers the 1x, 2x, and 3x tap target.
+        centerFlash = null
         hapticReminder.hapticWristRoll()
 
         val type = currentWidgetType
@@ -760,7 +838,6 @@ fun GibberWearScreen(
                                 } else if (
                                     activeWidget == WidgetType.W1_MONO ||
                                     activeWidget == WidgetType.W1X2 ||
-                                    activeWidget == WidgetType.W2_SWITCHBOX ||
                                     activeWidget == WidgetType.W3_RINGS
                                 ) {
                                     if (now - lastTapTime < 300L) {
@@ -792,32 +869,28 @@ fun GibberWearScreen(
             WidgetType.W8_OCTAD -> W8OctadWidget(poleValues, focusedPoleIndex)
         }
 
-        val density = LocalDensity.current
-        val maxRadius = min(canvasSize.width, canvasSize.height) / 2f
-        val innerDiameterPx = if (maxRadius <= 0f) {
-            0f
-        } else when (activeWidget) {
-            WidgetType.W1_MONO,
-            WidgetType.W1X2,
-            WidgetType.W3_RINGS -> {
+        val showCenterTap = activeWidget == WidgetType.W1_MONO ||
+                activeWidget == WidgetType.W1X2 ||
+                activeWidget == WidgetType.W3_RINGS
+        if (showCenterTap) {
+            val density = LocalDensity.current
+            val maxRadius = min(canvasSize.width, canvasSize.height) / 2f
+            val innerDiameterPx = if (maxRadius <= 0f) {
+                0f
+            } else {
                 val centers = WidgetGeometry.ringCenters(maxRadius, strokePx, activeWidget.poleCount)
                 (centers.last() - strokePx / 2f).coerceAtLeast(0f) * 2f
             }
-            WidgetType.W2_SWITCHBOX -> {
-                val outer = maxRadius * 0.98f
-                (outer - strokePx).coerceAtLeast(0f) * 2f
-            }
-            else -> maxRadius
-        }
-        val innerCircleDp = with(density) { innerDiameterPx.toDp() }
+            val innerCircleDp = with(density) { innerDiameterPx.toDp() }
 
-        Box(
-            modifier = Modifier
-                .size(innerCircleDp)
-                .clip(CircleShape)
-                .background(centerFlash ?: Color.Transparent),
-            contentAlignment = Alignment.Center
-        ) {
+            Box(
+                modifier = Modifier
+                    .size(innerCircleDp)
+                    .clip(CircleShape)
+                    .background(centerFlash ?: Color.Transparent),
+                contentAlignment = Alignment.Center
+            ) {
+            }
         }
 
         Box(

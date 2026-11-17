@@ -59,42 +59,7 @@ fun W4TetradWidget(
     poleValues: IntArray,
     focusedPoleIndex: Int
 ) {
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val center = Offset(size.width / 2f, size.height / 2f)
-        val radius = min(size.width, size.height) / 2f * WidgetGeometry.RADAR_RADIUS_FRAC
-
-        val angles = listOf(-90f, 0f, 90f, 180f)
-        val vertices = angles.map { angle ->
-            val rad = angle * PI.toFloat() / 180f
-            Offset(center.x + radius * cos(rad), center.y + radius * sin(rad))
-        }
-
-        // Draw diamond
-        val diamondPath = Path().apply {
-            moveTo(vertices[0].x, vertices[0].y)
-            lineTo(vertices[1].x, vertices[1].y)
-            lineTo(vertices[2].x, vertices[2].y)
-            lineTo(vertices[3].x, vertices[3].y)
-            close()
-        }
-        drawPath(diamondPath, color = Color.Gray, style = Stroke(2f))
-
-        val fillPath = Path()
-        for (i in 0 until 4) {
-            val v = poleValues.getOrElse(i) { 0 }.coerceIn(0, 100) / 100f
-            val rad = angles[i] * PI.toFloat() / 180f
-            val pt = Offset(center.x + (radius * v) * cos(rad), center.y + (radius * v) * sin(rad))
-            if (i == 0) fillPath.moveTo(pt.x, pt.y) else fillPath.lineTo(pt.x, pt.y)
-
-            // Draw axis line thicker if focused
-            val strokeW = if (i == focusedPoleIndex) 6f else 2f
-            val axisColor = if (i == focusedPoleIndex) Color.White else Color.Gray.copy(alpha = 0.5f)
-            drawLine(axisColor, center, vertices[i], strokeWidth = strokeW)
-        }
-        fillPath.close()
-
-        drawPath(fillPath, color = getRingColor(poleValues.getOrElse(focusedPoleIndex) { 0 }).copy(alpha = 0.5f))
-    }
+    DrawRadarWeb(4, poleValues, focusedPoleIndex)
 }
 
 @Composable
@@ -102,37 +67,5 @@ fun W5PentadWidget(
     poleValues: IntArray,
     focusedPoleIndex: Int
 ) {
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val center = Offset(size.width / 2f, size.height / 2f)
-        val radius = min(size.width, size.height) / 2f * WidgetGeometry.RADAR_RADIUS_FRAC
-
-        val angles = List(5) { i -> -90f + i * 72f }
-        val vertices = angles.map { angle ->
-            val rad = angle * PI.toFloat() / 180f
-            Offset(center.x + radius * cos(rad), center.y + radius * sin(rad))
-        }
-
-        // Draw pentagon
-        val shapePath = Path().apply {
-            moveTo(vertices[0].x, vertices[0].y)
-            for (i in 1 until 5) lineTo(vertices[i].x, vertices[i].y)
-            close()
-        }
-        drawPath(shapePath, color = Color.Gray, style = Stroke(2f))
-
-        val fillPath = Path()
-        for (i in 0 until 5) {
-            val v = poleValues.getOrElse(i) { 0 }.coerceIn(0, 100) / 100f
-            val rad = angles[i] * PI.toFloat() / 180f
-            val pt = Offset(center.x + (radius * v) * cos(rad), center.y + (radius * v) * sin(rad))
-            if (i == 0) fillPath.moveTo(pt.x, pt.y) else fillPath.lineTo(pt.x, pt.y)
-
-            val strokeW = if (i == focusedPoleIndex) 6f else 2f
-            val axisColor = if (i == focusedPoleIndex) Color.White else Color.Gray.copy(alpha = 0.5f)
-            drawLine(axisColor, center, vertices[i], strokeWidth = strokeW)
-        }
-        fillPath.close()
-
-        drawPath(fillPath, color = getRingColor(poleValues.getOrElse(focusedPoleIndex) { 0 }).copy(alpha = 0.5f))
-    }
+    DrawRadarWeb(5, poleValues, focusedPoleIndex)
 }

@@ -14,7 +14,7 @@ import kotlin.math.min
 import kotlin.math.sin
 
 @Composable
-private fun DrawRadarWeb(
+internal fun DrawRadarWeb(
     poleCount: Int,
     poleValues: IntArray,
     focusedPoleIndex: Int,
@@ -49,9 +49,11 @@ private fun DrawRadarWeb(
 
             if (i == 0) fillPath.moveTo(pt.x, pt.y) else fillPath.lineTo(pt.x, pt.y)
 
-            val strokeW = if (i == focusedPoleIndex) 6f else 2f
-            val axisColor = if (i == focusedPoleIndex) Color.White else Color.Gray.copy(alpha = 0.5f)
+            val focused = i == focusedPoleIndex
+            val strokeW = if (focused) 6f else 2f
+            val axisColor = if (focused) Color.White else Color.Gray.copy(alpha = 0.5f)
             drawLine(axisColor, center, maxPt, strokeWidth = strokeW)
+            drawCircle(color = axisColor, radius = if (focused) 8f else 5f, center = pt)
         }
         fillPath.close()
 

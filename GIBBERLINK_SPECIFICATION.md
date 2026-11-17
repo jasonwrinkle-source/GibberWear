@@ -15,6 +15,7 @@ The goal of this revision is to transition **GibberWear** from an un-attributed,
 3. **No Hardcoded Autonomous Defaults:** The watch must **not** default to an autonomous 5-minute reminder loop. Check-in reminders are primarily initiated remotely by Muse, or governed by explicitly provisioned local timer intervals.
 4. **Attributed Telemetry:** All telemetry emitted by the watch must carry a provisioned **User Identifier (`UID`)** so Muse can distinguish multiple senders in the same acoustic space.
 5. **On-Watch Provisioning:** The watch receives its `UID`, display name, and operational timer parameters via a setup handshake over GibberLink or BLE.
+6. **Addressed commands:** Every Muse → watch command carries an address: the provisioned profile key, or `ALL`. A command with no address is ignored. Treating a missing key as a broadcast is deprecated.
 
 ---
 
@@ -90,14 +91,17 @@ Format: `CHK:<TARGET_UID>:<TYPE>`
 
 To aggressively preserve battery life, Muse can disable the watch's microphone and ultrasound decoding engine when a reliable BLE link is present.
 
-Format: `LPM:<STATE>`
+Format: `LPM:<TARGET>:<STATE>`
 
 | Field | Values | Description |
 | :--- | :--- | :--- |
+| `<TARGET>` | Profile key or `ALL` | Only the matching watch responds (`ALL` for every watch). A missing target is ignored. |
 | `<STATE>` | `1` or `ON` | Enable Low Power Mode. If BLE is connected, ultrasound listening stops immediately. |
 | `<STATE>` | `0` or `OFF`| Disable Low Power Mode. Ultrasound listening resumes (always on). |
 
-*Behavior:* The watch persists this state. If `LPM=1` and the BLE link drops, the ultrasound engine will automatically restart to guarantee delivery via the fallback acoustic channel.
+The older unkeyed form `LPM:1` / `LPM:ON` is ignored.
+
+*Behavior:* The watch persists this state. If low power mode is on and the BLE link drops, the ultrasound engine restarts so the acoustic channel can still deliver.
 
 ---
 
@@ -144,6 +148,8 @@ CFG:<KEY>:<DISPLAY_NAME>:<TIMER_SEC>
 - `CFG:eve:300` $\rightarrow$ Key `eve`, 5-minute local reminder.
 - `CFG:eve:0` $\rightarrow$ Key `eve`, reminders only when Muse sends `CHK`.
 - `CFG:J1:Jason:0` $\rightarrow$ Key `J1`, timer off. `Jason` is ignored until the face shows a display name.
+- `CFG:ALL:300` $\rightarrow$ Every watch sets its timer to 300 seconds and keeps its own key. Each watch answers `ACK:<its key>:CFG`.
+- `CFG:300` or `CFG:` with no key is ignored.
 
 #### Provisioning Handshake Acknowledgment (Watch $\rightarrow$ Muse)
 When the watch successfully parses and persists the `CFG` message, it immediately emits:
@@ -151,6 +157,17 @@ When the watch successfully parses and persists the `CFG` message, it immediatel
 ACK:<UID>:CFG
 ```
 *(e.g., `ACK:J1:CFG`)*, allowing Muse to confirm that programming succeeded.
+
+#### Heat sync (Muse $\rightarrow$ Watch)
+After the heat-popover setup is confirmed, Muse sends the profile's current heat about 1.5 seconds later:
+
+```text
+HEAT:<KEY>:<VALUE>
+```
+
+`<VALUE>` is an integer from −100 to +100. The watch sets the heat ring (pole 1 on W1x2 and W1x3) and keeps that value across restarts. It does not transmit a rating or an ACK. `<KEY>` must be `ALL` or the provisioned profile key. A missing key is ignored.
+
+*Example:* `HEAT:eve:40`
 
 ---
 
@@ -198,7 +215,7 @@ stateDiagram-v2
 - **Service UUID:** `0000FFF0-0000-1000-8000-00805F9B34FB` (GibberLink BLE Service)
 - **Characteristics:**
   - **Telemetry TX (Notify):** Emits outgoing attributed payloads (`eve:TAP`, `RATE:eve:...`).
-  - **Control RX (Write):** Accepts incoming commands (`CFG:...`, `CHK:...`, `LPM:...`, `PROG:...`).
+  - **Control RX (Write):** Accepts incoming commands (`CFG:...`, `CHK:...`, `LPM:...`, `PROG:...`, `HEAT:...`).
 - Payload parsing logic is identical between GibberLink and BLE.
 
 ---
